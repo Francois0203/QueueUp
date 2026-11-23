@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="robots" content="noindex">
+  <title>DJ Console · QueueUp</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dj">
+  <!-- Login -->
+  <div class="login" id="login" hidden>
+    <form class="login-card" id="loginForm">
+      <div class="brand-mark" style="width:48px;height:48px;border-radius:14px;margin:0 auto" id="loginLogo"></div>
+      <h1>DJ Console</h1>
+      <p>Enter your PIN to take control.</p>
+      <input class="input pin" id="pin" inputmode="numeric" autocomplete="current-password" maxlength="12" placeholder="••••••" aria-label="PIN">
+      <button class="btn btn-primary" style="width:100%;margin-top:12px" type="submit">Unlock</button>
+      <p class="note" style="margin-top:18px">The PIN is printed in the server console when QueueUp starts.</p>
+    </form>
+  </div>
+
+  <!-- Console -->
+  <main class="shell" id="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" id="logo"></div>
+        <div class="brand-name" id="partyName">QueueUp</div>
+      </div>
+      <div class="chips">
+        <span class="chip" id="chipGuests"><span class="d"></span><span>0 guests</span></span>
+        <span class="chip" id="chipSpotify"><span class="d"></span><span>Spotify</span></span>
+      </div>
+    </header>
+
+    <nav class="seg" id="tabs">
+      <div class="seg-thumb" id="segThumb"></div>
+      <button data-tab="requests" class="on">Requests</button>
+      <button data-tab="settings">Settings</button>
+      <button data-tab="share">Share</button>
+    </nav>
+
+    <!-- Requests -->
+    <section class="panel on" id="panel-requests">
+      <div class="np-mini">
+        <div class="art" id="npArt"></div>
+        <div class="meta">
+          <div class="label" id="npLabel">Now playing</div>
+          <div class="title" id="npTitle">Nothing playing</div>
+          <div class="sub" id="npArtist"></div>
+        </div>
+        <button class="btn btn-sm" id="npEdit" hidden>Set</button>
+      </div>
+      <form id="npForm" class="card" style="padding:16px 18px" hidden>
+        <div class="field"><label for="npT">Song</label><input class="input" id="npT" maxlength="120" placeholder="What's playing?"></div>
+        <div class="field"><label for="npA">Artist</label><input class="input" id="npA" maxlength="120" placeholder="Artist"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-sm btn-ghost" type="button" id="npClear">Clear</button>
+          <button class="btn btn-sm btn-primary" type="submit">Update</button>
+        </div>
+      </form>
+
+      <div id="queuedWrap" hidden>
+        <div class="section-head"><span>Queued</span><span class="count" id="queuedCount"></span></div>
+        <ul class="list" id="queued"></ul>
+      </div>
+
+      <div class="section-head"><span>Requests</span><span class="count" id="pendingCount"></span></div>
+      <ul class="list" id="pending"></ul>
+      <div class="empty" id="pendingEmpty" hidden><strong>All clear</strong>New requests will appear here instantly.</div>
+
+      <div id="playedWrap" hidden>
+        <div class="section-head"><span>Played</span><span class="count" id="playedCount"></span></div>
+        <ul class="list" id="played"></ul>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="panel" id="panel-settings">
+      <div class="card">
+        <div class="setting">
+          <div class="setting-text"><b>Party name</b><span>Shown at the top of the guest page</span></div>
+          <input class="input" id="sName" maxlength="40">
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>Accept requests</b><span>Pause when you need a breather</span></div>
+          <label class="switch"><input type="checkbox" id="sRequests"><span></span></label>
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>Voting</b><span>Let guests upvote requests</span></div>
+          <label class="switch"><input type="checkbox" id="sVoting"><span></span></label>
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>Allow explicit songs</b><span>Hidden from search when off</span></div>
+          <label class="switch"><input type="checkbox" id="sExplicit"><span></span></label>
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>Show guest names</b><span>Display who requested each song</span></div>
+          <label class="switch"><input type="checkbox" id="sNames"><span></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="setting">
+          <div class="setting-text"><b>Open requests per guest</b><span>0 = unlimited</span></div>
+          <div class="stepper" data-key="maxPendingPerGuest" data-min="0" data-max="20">
+            <button class="btn btn-icon" data-d="-1" aria-label="Decrease">−</button><output>3</output><button class="btn btn-icon" data-d="1" aria-label="Increase">+</button>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>Auto-queue at votes</b><span>Queue automatically when a request hits this many votes. 0 = you decide every time</span></div>
+          <div class="stepper" data-key="autoQueueAt" data-min="0" data-max="100">
+            <button class="btn btn-icon" data-d="-1" aria-label="Decrease">−</button><output>0</output><button class="btn btn-icon" data-d="1" aria-label="Increase">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="setting">
+          <div class="setting-text"><b>Spotify</b><span id="spotifyText">Not connected</span></div>
+          <div id="spotifyAction"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="setting">
+          <div class="setting-text"><b>Clear history</b><span>Remove played and dismissed songs</span></div>
+          <button class="btn btn-sm" id="clearHistory">Clear</button>
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>Reset requests</b><span>Remove every request, including the queue</span></div>
+          <button class="btn btn-sm btn-danger" id="clearAll">Reset</button>
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>Sign out</b><span>Lock this device</span></div>
+          <button class="btn btn-sm" id="logout">Sign out</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Share -->
+    <section class="panel" id="panel-share">
+      <div class="qr-card" id="qrCard">
+        <img id="qr" alt="QR code to join the party">
+        <div class="qr-title" id="qrTitle">Tonight</div>
+        <div class="qr-sub">Scan to see what's playing &amp; request a song</div>
+      </div>
+      <div class="url-row">
+        <input class="input" id="guestUrl" aria-label="Guest link">
+        <button class="btn btn-sm" id="saveUrl" hidden>Save</button>
+        <button class="btn btn-sm" id="copyUrl">Copy</button>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
+        <button class="btn btn-sm btn-ghost" id="printQr">Print</button>
+        <a class="btn btn-sm btn-ghost" id="openGuest" target="_blank" rel="noopener" style="text-decoration:none">Open guest view</a>
+      </div>
+      <p class="note" style="text-align:center">Guests' phones must be able to reach this link — same Wi-Fi for a local address, or set a public URL (e.g. a tunnel or deployed host). Edit the link above to change the QR code.</p>
+    </section>
+  </main>
+
+  <div class="print-area" id="printArea"></div>
+  <script type="module" src="dj.js"></script>
+</body>
+</html>
