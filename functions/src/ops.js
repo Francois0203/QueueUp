@@ -1,6 +1,6 @@
 // QueueUp party operations. Every write goes through here; Firestore rules forbid client writes.
 import crypto from 'node:crypto';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions';
 import { authorizeUrl, exchangeCode, clientFor, isClientId } from './spotify.js';
 import { fail, clean, randomCode, isPartyCode, limited, signTrack, verifyTrack, randomKey, timingSafeEqualStr } from './util.js';
@@ -8,6 +8,7 @@ import { fail, clean, randomCode, isPartyCode, limited, signTrack, verifyTrack, 
 const TERMS_VERSION = '2026-11-24'; // bump when the Terms change materially
 const IDLE_MS = 48 * 3600_000;      // parties idle this long are deleted
 const CLOSED_TTL_MS = 3 * 3600_000; // played/dismissed requests kept this long
+const QUEUED_TTL_MS = 2 * 3600_000; // 'Up next' songs that never played are cleared after this
 const INVITE_TTL_MS = 10 * 60_000;  // one-time DJ links work this long
 
 // DJ links are stored hashed, so a leaked database copy can't be used to sign in.
@@ -61,11 +62,12 @@ async function requireDj(code, uid) {
 // lastActive drives cleanup. Writing the party doc makes every guest re-read it,
 // so it's refreshed at most every 10 minutes per party.
 const lastTouched = new Map();
-function touch(r, code) {
+async function touch(r, code) {
   const now = Date.now();
   if (now - (lastTouched.get(code) || 0) < 10 * 60_000) return;
   lastTouched.set(code, now);
-  r.party.update({ lastActive: now }).catch(() => {});
+  // Awaited: once the function has replied it gets almost no CPU, so a background write could stall.
+  await r.party.update({ lastActive: now }).catch(() => lastTouched.delete(code));
 }
 
 // ---------------------------------------------------------------- Spotify sessions
@@ -162,24 +164,57 @@ async function maybeAutoQueue(code, r, party, id, votes) {
   }
 }
 
-const lastPruned = new Map();
-async function pruneClosed(code, r) {
+/**
+ * Close a request (played, dismissed or skipped). It's stamped with expireAt, and Firestore's TTL
+ * policy deletes it and its requester name after that, even if the party goes quiet.
+ */
+function closeRequest(batch, r, ref, status, now = Date.now()) {
+  const expireAt = Timestamp.fromMillis(now + CLOSED_TTL_MS);
+  batch.update(ref, { status, closedAt: now, expireAt, ...(status === 'played' ? { playedAt: now } : {}) });
+  batch.set(r.meta.doc(ref.id), { expireAt }, { merge: true });
+}
+
+/**
+ * Housekeeping while a party is busy (at most every 10 minutes): delete closed requests now rather
+ * than waiting for TTL, and clear "Up next" songs that never played (removed from Spotify's queue,
+ * or a DJ without Spotify who never marked them).
+ */
+const lastTidied = new Map();
+async function tidy(code, r) {
   const now = Date.now();
-  if (now - (lastPruned.get(code) || 0) < 10 * 60_000) return;
-  lastPruned.set(code, now);
-  const old = await r.requests.where('closedAt', '<', now - CLOSED_TTL_MS).limit(100).get();
-  if (old.empty) return;
+  if (now - (lastTidied.get(code) || 0) < 10 * 60_000) return;
+  lastTidied.set(code, now);
+  const [old, queued] = await Promise.all([
+    r.requests.where('closedAt', '<', now - CLOSED_TTL_MS).limit(100).get(),
+    r.requests.where('status', '==', 'queued').get(),
+  ]);
+  const stale = queued.docs.filter(d => d.data().queuedAt < now - QUEUED_TTL_MS);
+  if (old.empty && !stale.length) return;
   const batch = db().batch();
   old.forEach(d => { batch.delete(d.ref); batch.delete(r.meta.doc(d.id)); });
+  stale.forEach(d => closeRequest(batch, r, d.ref, 'skipped', now));
   await batch.commit();
 }
 
+/**
+ * A song started playing: close its requests as played. Spotify plays its queue in order, so if it
+ * was queued, anything queued before it that hasn't played was skipped or removed: clear those too.
+ */
 async function markPlayed(r, trackId) {
-  const snap = await r.requests.where('trackId', '==', trackId).where('status', 'in', ['pending', 'queued']).get();
-  if (snap.empty) return;
+  const [mine, queued] = await Promise.all([
+    r.requests.where('trackId', '==', trackId).where('status', 'in', ['pending', 'queued']).get(),
+    r.requests.where('status', '==', 'queued').get(),
+  ]);
+  if (mine.empty) return;
   const now = Date.now();
   const batch = db().batch();
-  snap.forEach(d => batch.update(d.ref, { status: 'played', playedAt: now, closedAt: now }));
+  mine.forEach(d => closeRequest(batch, r, d.ref, 'played', now));
+  const at = Math.max(...mine.docs.map(d => (d.data().status === 'queued' ? d.data().queuedAt : 0)));
+  if (at > 0) {
+    queued.docs
+      .filter(d => d.data().trackId !== trackId && d.data().queuedAt < at)
+      .forEach(d => closeRequest(batch, r, d.ref, 'skipped', now));
+  }
   await batch.commit();
 }
 
@@ -236,7 +271,7 @@ export const ops = {
     } catch (e) {
       if (e.code !== 6) throw e; // already joined
     }
-    touch(r, code);
+    await touch(r, code);
     return { ok: true };
   },
 
@@ -310,8 +345,8 @@ export const ops = {
     batch.set(r.meta.doc(ref.id), { name: displayName, uid });
     await batch.commit();
     await maybeAutoQueue(code, r, party, ref.id, 1);
-    touch(r, code);
-    pruneClosed(code, r).catch(() => {});
+    await touch(r, code);
+    await tidy(code, r).catch(e => logger.warn(`[${code}] tidy failed`, e.message));
     return { id: ref.id };
   },
 
@@ -364,6 +399,7 @@ export const ops = {
       await r.party.update({ nowPlaying: np ? { ...np, updatedAt: Date.now(), source: 'spotify' } : null });
       if (np) await markPlayed(r, np.track.id);
     }
+    await tidy(code, r).catch(e => logger.warn(`[${code}] tidy failed`, e.message));
     return { ok: true };
   },
 
@@ -455,15 +491,22 @@ export const ops = {
       case 'queue':
         await queueRequest(code, r, party, ref.id, data);
         break;
-      case 'dismiss':
-        await ref.update({ status: 'dismissed', closedAt: now });
+      case 'dismiss': {
+        const batch = db().batch();
+        closeRequest(batch, r, ref, 'dismissed', now);
+        await batch.commit();
         break;
-      case 'restore':
-        await ref.update({ status: 'pending', closedAt: FieldValue.delete() });
+      }
+      case 'restore': {
+        const batch = db().batch();
+        batch.update(ref, { status: 'pending', closedAt: FieldValue.delete(), expireAt: FieldValue.delete() });
+        batch.set(r.meta.doc(ref.id), { expireAt: FieldValue.delete() }, { merge: true });
+        await batch.commit();
         break;
+      }
       case 'playing':
         await r.party.update({ nowPlaying: { track: data.track, progressMs: 0, isPlaying: true, updatedAt: now, source: 'manual' } });
-        await ref.update({ status: 'played', playedAt: now, closedAt: now });
+        await markPlayed(r, data.trackId);
         break;
       case 'block': {
         // Remove the requester's open requests and votes, refuse new ones.
@@ -473,7 +516,7 @@ export const ops = {
         const batch = db().batch();
         pending.forEach(d => {
           const x = d.data();
-          if (x.byUid === g) batch.update(d.ref, { status: 'dismissed', closedAt: now });
+          if (x.byUid === g) closeRequest(batch, r, d.ref, 'dismissed', now);
           else if (x.votes.includes(g)) batch.update(d.ref, { votes: FieldValue.arrayRemove(g) });
         });
         await batch.commit();
@@ -481,8 +524,8 @@ export const ops = {
       }
       default: fail('invalid-argument', 'Unknown action.');
     }
-    touch(r, code);
-    pruneClosed(code, r).catch(() => {});
+    await touch(r, code);
+    await tidy(code, r).catch(e => logger.warn(`[${code}] tidy failed`, e.message));
     return { ok: true };
   },
 

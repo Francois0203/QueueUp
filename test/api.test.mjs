@@ -293,6 +293,51 @@ test('now playing syncs from Spotify and marks the request as played', async () 
   fake.state.nowPlaying = null;
 });
 
+test('closed requests expire; songs skipped in the queue are cleared', async () => {
+  const { dj, code } = await newParty();
+  const ask = async title => (await (await browser())('request', { code, title })).data.id;
+  const [a, b, c] = [await ask('Song A'), await ask('Song B'), await ask('Song C')];
+  for (const id of [a, b, c]) {
+    assert.deepEqual((await dj('action', { code, id, action: 'queue' })).data, { ok: true });
+    await new Promise(r => setTimeout(r, 5)); // distinct queue times
+  }
+  const req = async id => (await admin.doc(`parties/${code}/requests/${id}`).get()).data();
+  const meta = async id => (await admin.doc(`parties/${code}/requestMeta/${id}`).get()).data();
+  const hoursLeft = d => (d.expireAt.toMillis() - Date.now()) / 3600_000;
+
+  // B plays: A was queued before it but never played, so A was skipped. C is still up next.
+  await dj('action', { code, id: b, action: 'playing' });
+  assert.equal((await req(b)).status, 'played');
+  assert.equal((await req(a)).status, 'skipped');
+  assert.equal((await req(c)).status, 'queued');
+  for (const id of [a, b]) {
+    assert.ok(Math.abs(hoursLeft(await req(id)) - 3) < 0.1, 'expires in 3 hours');
+    assert.ok((await meta(id)).expireAt, 'requester name expires too');
+  }
+  assert.equal((await req(c)).expireAt, undefined, 'open requests never expire');
+
+  // Dismiss, then restore: the expiry is removed again.
+  await dj('action', { code, id: c, action: 'dismiss' });
+  assert.ok((await req(c)).expireAt);
+  await dj('action', { code, id: c, action: 'restore' });
+  assert.equal((await req(c)).status, 'pending');
+  assert.equal((await req(c)).expireAt, undefined);
+  assert.equal((await meta(c)).expireAt, undefined);
+});
+
+test('"Up next" songs that never played are cleared after 2 hours', async () => {
+  const { code } = await newParty();
+  // Seed directly: a song queued 3 hours ago and one queued just now.
+  const col = admin.collection(`parties/${code}/requests`);
+  const base = { track: { id: 'manual:x', title: 'x', artist: '', uri: '', album: '', art: '', durationMs: 0, explicit: false }, votes: [], byUid: 'u', byName: '', createdAt: 0, playedAt: 0 };
+  const old = await col.add({ ...base, trackId: 'manual:old', status: 'queued', queuedAt: Date.now() - 3 * 3600_000 });
+  const fresh = await col.add({ ...base, trackId: 'manual:fresh', status: 'queued', queuedAt: Date.now() });
+  // Any request runs the housekeeping (first time for this party, so it isn't throttled).
+  await (await browser())('request', { code, title: 'Anything' });
+  assert.equal((await old.get()).data().status, 'skipped');
+  assert.equal((await fresh.get()).data().status, 'queued');
+});
+
 // ------------------------------------------------------------------ lifecycle
 
 test('ending a party deletes all its data; other parties live on', async () => {

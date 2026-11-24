@@ -5,7 +5,7 @@ import { db, ensureUser, SPOTIFY_REDIRECT_URI } from '../lib';
 
 export type RoomStatus = 'connecting' | 'live' | 'reconnecting' | 'ended';
 
-interface RequestDoc { trackId: string; track: SongRequest['track']; status: SongRequest['status'] | 'dismissed'; votes: string[]; byUid: string; byName: string; createdAt: number; queuedAt: number; playedAt: number }
+interface RequestDoc { trackId: string; track: SongRequest['track']; status: SongRequest['status'] | 'dismissed' | 'skipped'; votes: string[]; byUid: string; byName: string; createdAt: number; queuedAt: number; playedAt: number }
 
 /**
  * Live party state straight from Firestore (no server connection to keep open).
