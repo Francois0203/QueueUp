@@ -4,15 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a0a0b">
+  <meta name="robots" content="noindex">
   <title>QueueUp</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="ambient" id="ambient"><img alt=""></div>
+  <div class="aura" id="aura" aria-hidden="true"></div>
 
   <main class="shell">
     <header class="topbar">
@@ -24,11 +23,12 @@
     </header>
 
     <section class="hero hero-empty" id="hero" aria-live="polite">
-      <div class="hero-art" id="heroArt"></div>
+      <div class="hero-stage"><div class="hero-art" id="heroArt"></div></div>
       <div id="heroText">
         <div class="hero-label"><span class="eq"><i></i><i></i><i></i></span><span id="heroLabel">Now playing</span></div>
         <h1 class="hero-title" id="heroTitle">Waiting for the next track</h1>
         <div class="hero-artist" id="heroArtist">The DJ hasn't started yet</div>
+        <div id="heroLink"></div>
       </div>
       <div class="progress" id="progress" hidden>
         <span id="tNow">0:00</span>
@@ -45,13 +45,19 @@
     <div class="section-head"><span>Requests</span><span class="count" id="reqCount"></span></div>
     <ul class="list" id="requests"></ul>
     <div class="empty" id="empty" hidden>
+      <div class="empty-icon" id="emptyIcon"></div>
       <strong>No requests yet</strong>
       Be the first to pick a song.
     </div>
+
+    <footer class="foot">
+      <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a><br>
+      QueueUp is not affiliated with Spotify.
+    </footer>
   </main>
 
   <div class="fab-wrap">
-    <button class="btn btn-primary fab" id="fab"><span id="fabIcon"></span><span id="fabText">Request a song</span></button>
+    <button class="btn btn-primary fab" id="fab"><span id="fabIcon" style="display:inline-flex"></span><span id="fabText">Request a song</span></button>
   </div>
 
   <div class="scrim" id="scrim"></div>
@@ -66,7 +72,6 @@
       <input id="guestName" maxlength="24" placeholder="Your name (optional)" autocomplete="nickname">
     </div>
 
-    <!-- Spotify search -->
     <div id="searchMode">
       <div class="search">
         <span id="searchIcon"></span>
@@ -76,14 +81,15 @@
     <div class="sheet-body" id="sheetBody">
       <ul class="list" id="results"></ul>
       <div class="empty" id="resultsEmpty"><strong>Find your song</strong>Search by title or artist.</div>
+      <a class="spotify-attr" id="searchAttr" href="https://open.spotify.com" target="_blank" rel="noopener" hidden><span>Search powered by</span></a>
 
-      <!-- Manual mode (no Spotify connected) -->
       <form id="manualForm" hidden>
         <div class="field"><label for="mTitle">Song</label><input class="input" id="mTitle" maxlength="120" required placeholder="Song title"></div>
         <div class="field"><label for="mArtist">Artist</label><input class="input" id="mArtist" maxlength="120" placeholder="Artist (optional)"></div>
         <button class="btn btn-primary" style="width:100%;margin-top:6px" type="submit">Send request</button>
       </form>
     </div>
+    <p class="sheet-foot">Your name and request may be visible to others at this party. <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
   </section>
 
   <div class="login" id="ended" hidden>
@@ -91,7 +97,7 @@
       <div class="brand-mark" style="width:48px;height:48px;border-radius:14px;margin:0 auto" id="endedLogo"></div>
       <h1>This party has ended</h1>
       <p>The code may be wrong, or the DJ has wrapped up for the night.</p>
-      <a class="btn" href="/" style="text-decoration:none">Join another party</a>
+      <a class="btn" href="/">Join another party</a>
     </div>
   </div>
 

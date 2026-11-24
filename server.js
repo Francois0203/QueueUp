@@ -1,6 +1,6 @@
-// QueueUp — live song requests & voting for parties.
+// QueueUp — live song requests & voting for private parties.
 // Many independent rooms per server. Each DJ connects their own Spotify developer app.
-// State persists to data/rooms.json. Designed to run as a single long-lived process.
+// State persists, encrypted, to DATA_DIR/rooms.json. Designed to run as a single long-lived process.
 import http from 'node:http';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -15,10 +15,25 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'rooms.json');
+const KEY_FILE = path.join(DATA_DIR, 'secret.key');
 const PORT = Number(process.env.PORT) || 3000;
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 const ROOM_TTL_MS = 48 * 3600_000;   // rooms idle this long are deleted
 const MAX_ROOMS = 2000;
+const MAX_STREAMS = 5000;            // open live connections, server-wide
+const MAX_STREAMS_PER_IP = 30;
+const MAX_STREAMS_PER_ROOM = 600;
+const TERMS_VERSION = '2026-11-24'; // bump when the Terms change materially
+
+// Operator details shown in the Terms and Privacy Policy. Set these before going public.
+const OPERATOR = {
+  OPERATOR_NAME: process.env.OPERATOR_NAME || '[Operator name]',
+  OPERATOR_CONTACT: process.env.OPERATOR_CONTACT || '[contact email]',
+  OPERATOR_ADDRESS: process.env.OPERATOR_ADDRESS || '[postal address]',
+  GOVERNING_LAW: process.env.GOVERNING_LAW || '[country]',
+  HOSTING_PROVIDER: process.env.HOSTING_PROVIDER || '[hosting provider and region]',
+  TERMS_VERSION,
+};
 
 // ---------------------------------------------------------------- urls
 
@@ -33,9 +48,49 @@ function lanAddress() {
 
 /** Base URL guests' phones use (QR codes). */
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://${lanAddress()}:${PORT}`).replace(/\/$/, '');
+const SECURE = PUBLIC_URL.startsWith('https://');
 /** Redirect URI every DJ registers in their Spotify app. Spotify requires https or a 127.0.0.1 loopback. */
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI
-  || (PUBLIC_URL.startsWith('https://') ? `${PUBLIC_URL}/auth/spotify/callback` : `http://127.0.0.1:${PORT}/auth/spotify/callback`);
+  || (SECURE ? `${PUBLIC_URL}/auth/spotify/callback` : `http://127.0.0.1:${PORT}/auth/spotify/callback`);
+
+// ---------------------------------------------------------------- encryption at rest
+
+/**
+ * rooms.json holds DJ PINs and Spotify refresh tokens, so it is encrypted with AES-256-GCM.
+ * Production: set DATA_ENCRYPTION_KEY (32 random bytes, base64 or hex) from a secret store,
+ * so a copied disk or backup is useless on its own. Locally a key file is generated.
+ */
+function loadKey() {
+  const env = process.env.DATA_ENCRYPTION_KEY;
+  if (env) {
+    const key = /^[0-9a-f]{64}$/i.test(env) ? Buffer.from(env, 'hex') : Buffer.from(env, 'base64');
+    if (key.length !== 32) throw new Error('DATA_ENCRYPTION_KEY must be 32 bytes (64 hex chars or base64).');
+    return key;
+  }
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try { return Buffer.from(fs.readFileSync(KEY_FILE, 'utf8').trim(), 'base64'); }
+  catch {
+    const key = crypto.randomBytes(32);
+    fs.writeFileSync(KEY_FILE, key.toString('base64'), { mode: 0o600 });
+    if (SECURE) console.warn('  ! DATA_ENCRYPTION_KEY is not set. Generated data/secret.key — set the env var in production.');
+    return key;
+  }
+}
+const KEY = loadKey();
+
+function encrypt(obj) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', KEY, iv);
+  const data = Buffer.concat([c.update(JSON.stringify(obj), 'utf8'), c.final()]);
+  return JSON.stringify({ v: 1, iv: iv.toString('base64'), tag: c.getAuthTag().toString('base64'), data: data.toString('base64') });
+}
+function decrypt(text) {
+  const f = JSON.parse(text);
+  if (!f.v) return f; // legacy plaintext file: migrated on next save
+  const d = crypto.createDecipheriv('aes-256-gcm', KEY, Buffer.from(f.iv, 'base64'));
+  d.setAuthTag(Buffer.from(f.tag, 'base64'));
+  return JSON.parse(Buffer.concat([d.update(Buffer.from(f.data, 'base64')), d.final()]).toString('utf8'));
+}
 
 // ---------------------------------------------------------------- state
 
@@ -50,15 +105,19 @@ const DEFAULT_SETTINGS = {
 };
 
 /** @type {Map<string, any>} persisted rooms */
-let rooms = new Map();
-/** @type {Map<string, {clients:Set<any>, timer:any, pollKey:string}>} runtime-only data */
+const rooms = new Map();
+/** runtime-only data per room */
 const live = new Map();
 let saveTimer = null;
 
 try {
-  const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-  for (const r of raw.rooms || []) rooms.set(r.code, { ...r, settings: { ...DEFAULT_SETTINGS, ...r.settings } });
-} catch { /* first run */ }
+  const raw = decrypt(fs.readFileSync(STATE_FILE, 'utf8'));
+  for (const r of raw.rooms || []) rooms.set(r.code, { blocked: [], ...r, settings: { ...DEFAULT_SETTINGS, ...r.settings } });
+} catch (e) {
+  if (e.code !== 'ENOENT') console.error('  ! Could not read saved parties (wrong DATA_ENCRYPTION_KEY?):', e.message);
+}
+
+const snapshot = () => encrypt({ rooms: [...rooms.values()] });
 
 function saveSoon() {
   clearTimeout(saveTimer);
@@ -74,7 +133,7 @@ async function flushSave() {
   const tmp = `${STATE_FILE}.${process.pid}.${++tmpSeq}.tmp`;
   try {
     await fsp.mkdir(DATA_DIR, { recursive: true });
-    await fsp.writeFile(tmp, JSON.stringify({ rooms: [...rooms.values()] }), { mode: 0o600 });
+    await fsp.writeFile(tmp, snapshot(), { mode: 0o600 });
     await fsp.rename(tmp, STATE_FILE);
   } catch (e) {
     console.error('Save failed:', e);
@@ -92,20 +151,22 @@ function runtime(code) {
       clients: new Set(), timer: null, pollKey: '',
       spotify: null,        // cached client, so token refreshes are shared (single-flight)
       tracks: new Map(),    // trackId -> { track, exp }: songs this server returned from search
+      searches: new Map(),  // query -> { results, exp }: short cache to spare the DJ's Spotify quota
+      backoffUntil: 0,      // Spotify asked us to slow down until this time
     };
     live.set(code, rt);
   }
   return rt;
 }
 
-// ---- #1: only accept songs the server itself returned from Spotify search
+// Only accept songs the server itself returned from Spotify search.
 const TRACK_TTL_MS = 60 * 60_000;
-const TRACK_CACHE_MAX = 1000;
+const CACHE_MAX = 1000;
 function rememberTracks(room, tracks) {
   const cache = runtime(room.code).tracks;
   const exp = Date.now() + TRACK_TTL_MS;
   for (const t of tracks) { cache.delete(t.id); cache.set(t.id, { track: t, exp }); }
-  while (cache.size > TRACK_CACHE_MAX) cache.delete(cache.keys().next().value); // oldest first
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value); // oldest first
 }
 function knownTrack(room, id) {
   const hit = runtime(room.code).tracks.get(String(id || ''));
@@ -126,10 +187,12 @@ function createRoom(partyName) {
     code: newCode(),
     createdAt: Date.now(),
     lastActive: Date.now(),
+    termsAccepted: { version: TERMS_VERSION, at: Date.now() }, // record of the host's agreement
     djPin: String(crypto.randomInt(100000, 1000000)),
     djSessions: [],   // [{ hash, exp }]
     settings: { ...DEFAULT_SETTINGS, partyName: partyName || DEFAULT_SETTINGS.partyName },
     requests: [],
+    blocked: [],      // guest ids the DJ blocked
     nowPlaying: null,
     spotify: null,    // { clientId, auth, user }
   };
@@ -146,7 +209,7 @@ function deleteRoom(code) {
   saveSoon();
 }
 
-// Delete idle rooms.
+// Delete idle rooms (data minimisation: nothing is kept longer than needed).
 setInterval(() => {
   const cutoff = Date.now() - ROOM_TTL_MS;
   for (const r of rooms.values()) {
@@ -166,8 +229,11 @@ function spotifyOf(room) {
 }
 
 function spotifyError(room, err) {
-  // Only a definitive auth failure drops the connection (refresh token revoked, app deleted,
-  // or still 401 after a fresh token). Outages and 5xx/429 are temporary and must not disconnect.
+  if (err.status === 429) {
+    // Respect Spotify's Retry-After for the whole party (search, polling, queueing).
+    runtime(room.code).backoffUntil = Date.now() + Math.min(err.retryAfter || 5, 120) * 1000;
+  }
+  // Only a definitive auth failure drops the connection. Outages and 5xx/429 are temporary.
   if (err.revoked) {
     console.warn(`[${room.code}] Spotify auth lost:`, err.message);
     room.spotify = room.spotify ? { clientId: room.spotify.clientId, auth: null, user: null } : null;
@@ -176,9 +242,10 @@ function spotifyError(room, err) {
 }
 
 const isConnected = room => Boolean(room.spotify?.auth);
+const backingOff = room => runtime(room.code).backoffUntil > Date.now();
 
 async function pollRoom(room) {
-  if (!isConnected(room)) return;
+  if (!isConnected(room) || backingOff(room)) return;
   const rt = runtime(room.code);
   try {
     const np = await spotifyOf(room).nowPlaying();
@@ -249,8 +316,8 @@ function publicState(room, guestId, isDj) {
         redirectUri: REDIRECT_URI,
       } : {}),
     },
-    listeners: [...rt.clients].filter(c => !c.isDj).length,
-    ...(isDj ? { guestUrl: `${PUBLIC_URL}/p/${room.code}`, pin: room.djPin } : {}),
+    listeners: new Set([...rt.clients].filter(c => !c.isDj).map(c => c.guestId)).size, // people, not tabs
+    ...(isDj ? { guestUrl: `${PUBLIC_URL}/p/${room.code}`, pin: room.djPin, blockedCount: room.blocked.length } : {}),
     serverTime: Date.now(),
   };
 }
@@ -274,18 +341,22 @@ setInterval(() => {
   for (const rt of live.values()) for (const c of rt.clients) c.res.write(': ping\n\n');
 }, 25_000);
 
+const streamsByIp = new Map();
+let streamCount = 0;
+
 // ---------------------------------------------------------------- helpers
 
 function parseCookies(req) {
   const out = {};
   for (const part of (req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0) {
+      try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* malformed cookie */ }
+    }
   }
   return out;
 }
 
-const SECURE = PUBLIC_URL.startsWith('https://');
 function cookie(name, value, maxAgeSec) {
   return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${SECURE ? '; Secure' : ''}`;
 }
@@ -313,12 +384,18 @@ async function readBody(req) {
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw Object.assign(new Error('Invalid JSON'), { status: 400 }); }
+  try {
+    const v = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { throw Object.assign(new Error('Invalid JSON'), { status: 400 }); }
 }
 
-const clean = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+// Strip control characters, invisible characters and text-direction overrides
+// (used to make names or titles display as something they are not).
+const UNSAFE_CHARS = /[\p{Cc}​‎‏‪-‮⁠-⁤⁦-⁩﻿]/gu;
+const clean = (v, max) => String(v ?? '').replace(UNSAFE_CHARS, '').replace(/\s+/g, ' ').trim().slice(0, max);
 const sha = v => crypto.createHash('sha256').update(String(v)).digest('hex');
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function clientIp(req) {
   if (TRUST_PROXY) {
@@ -400,24 +477,51 @@ function spotifyHint(e) {
   return `Spotify: ${e.message}`;
 }
 
-// ---------------------------------------------------------------- static
+// ---------------------------------------------------------------- headers & static
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
-};
-const SECURITY_HEADERS = {
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'same-origin',
-  'X-Frame-Options': 'DENY',
+  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
 
-async function serveStatic(res, file, status = 200) {
+// Everything is self-hosted except album art (Spotify's CDN). No third-party scripts, fonts or trackers.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'", // inline style attributes only; no inline scripts are allowed
+  "img-src 'self' data: https://i.scdn.co https://*.scdn.co",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join('; ');
+
+function securityHeaders(res) {
+  res.setHeader('Content-Security-Policy', CSP);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+  if (SECURE) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+}
+
+async function serveStatic(res, file, { status = 200, fill = false } = {}) {
   const full = path.join(PUBLIC_DIR, file);
   if (!full.startsWith(PUBLIC_DIR + path.sep)) return json(res, 404, { error: 'Not found' });
   try {
-    const data = await fsp.readFile(full);
-    res.writeHead(status, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+    let data = await fsp.readFile(full);
+    // Legal pages: fill in operator details from the environment (HTML-escaped).
+    if (fill) data = data.toString('utf8').replace(/\{\{(\w+)\}\}/g, (m, k) => k in OPERATOR ? escapeHtml(OPERATOR[k]) : m);
+    const long = /\.(woff2)$/.test(file);
+    res.writeHead(status, {
+      'Content-Type': MIME[path.extname(full)] || 'application/octet-stream',
+      'Cache-Control': long ? 'public, max-age=31536000, immutable' : 'no-cache',
+    });
     res.end(data);
   } catch {
     json(res, 404, { error: 'Not found' });
@@ -428,6 +532,7 @@ async function serveStatic(res, file, status = 200) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    securityHeaders(res);
     await route(req, res);
   } catch (err) {
     const status = err.status && err.status < 500 ? err.status : 500;
@@ -435,9 +540,18 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) json(res, status, { error: status === 500 ? 'Something went wrong' : err.message });
   }
 });
+server.headersTimeout = 20_000;
+server.requestTimeout = 30_000;
 
 /** Pending Spotify logins: state -> { code, clientId, verifier, exp } */
 const pendingLogins = new Map();
+
+/** Blocks cross-site form/fetch posts. Browsers always send Origin on such requests. */
+function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // same-origin GET-style or non-browser client; cookies are SameSite=Lax anyway
+  try { return new URL(origin).host === req.headers.host; } catch { return false; }
+}
 
 async function route(req, res) {
   const url = new URL(req.url, 'http://x');
@@ -445,7 +559,9 @@ async function route(req, res) {
   const method = req.method;
   const cookies = parseCookies(req);
 
-  // Anonymous guest id for votes and request limits.
+  if (method !== 'GET' && method !== 'HEAD' && !sameOrigin(req)) return json(res, 403, { error: 'Cross-site request blocked.' });
+
+  // Anonymous guest id for votes and request limits. Strictly necessary; no tracking.
   let guestId = cookies.qu_gid;
   if (!guestId || !/^[a-f0-9]{32}$/.test(guestId)) {
     guestId = crypto.randomBytes(16).toString('hex');
@@ -461,14 +577,19 @@ async function route(req, res) {
       return serveStatic(res, 'index.html');
     }
     if (/^\/dj\/[A-Za-z0-9]{5}$/.test(p)) return serveStatic(res, 'dj.html');
-    if (p === '/healthz') return json(res, 200, { ok: true, rooms: rooms.size });
+    if (p === '/terms') return serveStatic(res, 'terms.html', { fill: true });
+    if (p === '/privacy') return serveStatic(res, 'privacy.html', { fill: true });
+    if (p === '/healthz') return json(res, 200, { ok: true });
+    if (/^\/fonts\/[\w.-]+\.(woff2|txt)$/.test(p)) return serveStatic(res, p.slice(1));
+    if (/^\/brand\/[\w.-]+\.(svg|png)$/.test(p)) return serveStatic(res, p.slice(1));
   }
 
-  // ---- create a party
+  // ---- create a party (host must accept the Terms)
   if (method === 'POST' && p === '/api/rooms') {
     if (limited(`create:${clientIp(req)}`, 10, 3600_000)) return json(res, 429, { error: 'Too many parties created. Try again later.' });
     if (rooms.size >= MAX_ROOMS) return json(res, 503, { error: 'QueueUp is full right now. Try again later.' });
     const body = await readBody(req);
+    if (body.acceptTerms !== true) return json(res, 400, { error: 'Please accept the Terms to host a party.' });
     const room = createRoom(clean(body.partyName, 40));
     return json(res, 201, { code: room.code, pin: room.djPin }, { 'Set-Cookie': newDjSession(room) });
   }
@@ -525,17 +646,30 @@ async function route(req, res) {
   }
   const sub = m[2];
   const dj = isDj(req, room);
+  const blocked = !dj && room.blocked.includes(guestId);
 
   // realtime stream
   if (method === 'GET' && sub === '/events') {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    const ip = clientIp(req);
     const rt = runtime(room.code);
+    if (streamCount >= MAX_STREAMS || (streamsByIp.get(ip) || 0) >= MAX_STREAMS_PER_IP || rt.clients.size >= MAX_STREAMS_PER_ROOM) {
+      return json(res, 503, { error: 'Too many open connections.' });
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     const c = { res, guestId, isDj: dj };
     rt.clients.add(c);
+    streamCount++;
+    streamsByIp.set(ip, (streamsByIp.get(ip) || 0) + 1);
     send(c, 'state', publicState(room, guestId, dj));
     if (!rt.pollKey && isConnected(room)) pollRoom(room);
     changed(room);
-    req.on('close', () => { rt.clients.delete(c); if (rooms.has(room.code)) changed(room); });
+    req.on('close', () => {
+      rt.clients.delete(c);
+      streamCount--;
+      const n = (streamsByIp.get(ip) || 1) - 1;
+      if (n > 0) streamsByIp.set(ip, n); else streamsByIp.delete(ip);
+      if (rooms.has(room.code)) changed(room);
+    });
     return;
   }
 
@@ -547,20 +681,30 @@ async function route(req, res) {
     if (!q) return json(res, 200, { results: [] });
     if (!isConnected(room)) return json(res, 200, { results: [], manual: true });
     if (limited(`search:${room.code}:${guestId}`, 40, 60_000)) return json(res, 429, { error: 'Searching too fast. Wait a moment.' });
-    try {
-      let results = await spotifyOf(room).search(q);
-      rememberTracks(room, results);
-      if (!room.settings.allowExplicit) results = results.filter(t => !t.explicit);
-      return json(res, 200, { results });
-    } catch (e) {
-      spotifyError(room, e);
-      return json(res, e.status === 429 ? 429 : 502, { error: e.status === 429 ? 'Spotify is busy. Try again in a few seconds.' : 'Search is unavailable right now.' });
+    const rt = runtime(room.code);
+    const key = q.toLowerCase();
+    let results = rt.searches.get(key)?.exp > Date.now() ? rt.searches.get(key).results : null;
+    if (!results) {
+      if (backingOff(room)) return json(res, 429, { error: 'Spotify is busy. Try again in a few seconds.' });
+      try {
+        results = await spotifyOf(room).search(q);
+        rt.searches.delete(key);
+        rt.searches.set(key, { results, exp: Date.now() + 5 * 60_000 });
+        while (rt.searches.size > CACHE_MAX) rt.searches.delete(rt.searches.keys().next().value);
+      } catch (e) {
+        spotifyError(room, e);
+        return json(res, e.status === 429 ? 429 : 502, { error: e.status === 429 ? 'Spotify is busy. Try again in a few seconds.' : 'Search is unavailable right now.' });
+      }
     }
+    rememberTracks(room, results);
+    if (!room.settings.allowExplicit) results = results.filter(t => !t.explicit);
+    return json(res, 200, { results });
   }
 
   // guest: request a song
   if (method === 'POST' && sub === '/requests') {
     const s = room.settings;
+    if (blocked) return json(res, 403, { error: 'The DJ isn’t taking requests from you right now.' });
     if (!s.requestsOpen && !dj) return json(res, 403, { error: 'Requests are paused right now.' });
     if (limited(`req:${room.code}:${guestId}`, 10, 60_000)) return json(res, 429, { error: 'Too many requests. Wait a moment.' });
     const body = await readBody(req);
@@ -588,7 +732,7 @@ async function route(req, res) {
       }
       sortRequests(room);
       changed(room);
-      return json(res, 200, { ok: true, merged: true, status: existing.status });
+      return json(res, 200, { ok: true, merged: true, status: existing.status, id: existing.id });
     }
 
     const mine = room.requests.filter(r => r.by.guestId === guestId && r.status === 'pending').length;
@@ -608,7 +752,9 @@ async function route(req, res) {
   // guest: vote / unvote
   let mm = sub.match(/^\/requests\/([\w-]+)\/vote$/);
   if (mm && method === 'POST') {
+    if (blocked) return json(res, 403, { error: 'The DJ isn’t taking votes from you right now.' });
     if (!room.settings.votingOpen) return json(res, 403, { error: 'Voting is paused right now.' });
+    if (limited(`vote:${room.code}:${guestId}`, 60, 60_000)) return json(res, 429, { error: 'Easy there. Wait a moment.' });
     const r = room.requests.find(x => x.id === mm[1]);
     if (!r || r.status !== 'pending') return json(res, 404, { error: 'That request is no longer open.' });
     const i = r.votes.indexOf(guestId);
@@ -674,8 +820,11 @@ async function route(req, res) {
   }
 
   if (method === 'POST' && sub === '/dj/spotify/disconnect') {
+    // Forget the tokens entirely (not just mark disconnected).
     room.spotify = room.spotify ? { clientId: room.spotify.clientId, auth: null, user: null } : null;
     if (room.nowPlaying?.source === 'spotify') room.nowPlaying = null;
+    const rt = runtime(room.code);
+    rt.searches.clear();
     changed(room);
     return json(res, 200, { ok: true });
   }
@@ -697,14 +846,15 @@ async function route(req, res) {
     return json(res, 200, { ok: true, settings: s });
   }
 
-  mm = sub.match(/^\/dj\/requests\/([\w-]+)\/(queue|dismiss|playing|restore)$/);
+  mm = sub.match(/^\/dj\/requests\/([\w-]+)\/(queue|dismiss|playing|restore|block)$/);
   if (mm && method === 'POST') {
     const r = room.requests.find(x => x.id === mm[1]);
     if (!r) return json(res, 404, { error: 'Request not found.' });
     const action = mm[2];
     if (action === 'queue') {
+      if (backingOff(room)) return json(res, 429, { error: 'Spotify is rate-limiting right now. Try again in a few seconds.' });
       try { await queueRequest(room, r); }
-      catch (e) { spotifyError(room, e); return json(res, 502, { error: spotifyHint(e) }); }
+      catch (e) { spotifyError(room, e); return json(res, e.status === 429 ? 429 : 502, { error: spotifyHint(e) }); }
     } else if (action === 'dismiss') {
       r.status = 'dismissed';
     } else if (action === 'restore') {
@@ -713,8 +863,22 @@ async function route(req, res) {
       room.nowPlaying = { track: r.track, progressMs: 0, isPlaying: true, updatedAt: Date.now(), source: 'manual' };
       r.status = 'played';
       r.playedAt = Date.now();
+    } else if (action === 'block') {
+      // Block the requester: remove their open requests and votes, refuse new ones.
+      const g = r.by.guestId;
+      if (!room.blocked.includes(g)) room.blocked.push(g);
+      for (const x of room.requests) {
+        if (x.by.guestId === g && x.status === 'pending') x.status = 'dismissed';
+        x.votes = x.votes.filter(v => v !== g);
+      }
     }
     sortRequests(room);
+    changed(room);
+    return json(res, 200, { ok: true });
+  }
+
+  if (method === 'POST' && sub === '/dj/unblock-all') {
+    room.blocked = [];
     changed(room);
     return json(res, 200, { ok: true });
   }
@@ -750,7 +914,9 @@ server.listen(PORT, () => {
   console.log(`  Open:          http://127.0.0.1:${PORT}`);
   console.log(`  Guest links:   ${PUBLIC_URL}/p/<code>`);
   console.log(`  Spotify redirect URI (DJs add this to their Spotify app):`);
-  console.log(`                 ${REDIRECT_URI}\n`);
+  console.log(`                 ${REDIRECT_URI}`);
+  if (OPERATOR.OPERATOR_NAME.startsWith('[')) console.log('  ! Legal pages use placeholders. Set OPERATOR_NAME, OPERATOR_CONTACT, ... (see .env.example).');
+  console.log('');
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
@@ -758,7 +924,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     clearTimeout(saveTimer);
     try {
       fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(STATE_FILE, JSON.stringify({ rooms: [...rooms.values()] }), { mode: 0o600 });
+      fs.writeFileSync(STATE_FILE, snapshot(), { mode: 0o600 });
     } catch (e) { console.error(e); }
     process.exit(0);
   });

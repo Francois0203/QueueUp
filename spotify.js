@@ -111,7 +111,11 @@ export function clientFor(getConn, setConn) {
     if (!res.ok) {
       let msg = text;
       try { msg = JSON.parse(text).error?.message || text; } catch {}
-      throw Object.assign(new Error(msg || `Spotify error ${res.status}`), { status: res.status, revoked: res.status === 401 });
+      throw Object.assign(new Error(msg || `Spotify error ${res.status}`), {
+        status: res.status,
+        revoked: res.status === 401,
+        retryAfter: Number(res.headers.get('retry-after')) || 0, // seconds, sent with 429
+      });
     }
     return text ? JSON.parse(text) : null;
   }

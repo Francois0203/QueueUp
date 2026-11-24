@@ -7,6 +7,8 @@ export async function startFakeSpotify() {
     usedRefresh: new Set(),
     refreshCalls: 0,
     failRefreshWith: 0,          // set to e.g. 500 to simulate an outage
+    searchCalls: 0,
+    rateLimitSearch: 0,          // set to N seconds to answer search with 429 + Retry-After
     queued: [],
     nowPlaying: null,
     seq: 0,
@@ -55,7 +57,14 @@ export async function startFakeSpotify() {
     if (!state.validTokens.has(token)) return send(res, 401, { error: { status: 401, message: 'Invalid access token' } });
 
     if (url.pathname === '/v1/me') return send(res, 200, { id: 'dj', display_name: 'Test DJ', product: 'premium' });
-    if (url.pathname === '/v1/search') return send(res, 200, { tracks: { items: tracks } });
+    if (url.pathname === '/v1/search') {
+      state.searchCalls++;
+      if (state.rateLimitSearch) {
+        res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(state.rateLimitSearch) });
+        return res.end(JSON.stringify({ error: { status: 429, message: 'API rate limit exceeded' } }));
+      }
+      return send(res, 200, { tracks: { items: tracks } });
+    }
     if (url.pathname === '/v1/me/player/currently-playing') {
       return state.nowPlaying ? send(res, 200, { item: state.nowPlaying, progress_ms: 1000, is_playing: true, currently_playing_type: 'track' }) : send(res, 204);
     }

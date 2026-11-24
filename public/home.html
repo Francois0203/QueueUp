@@ -4,20 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a0a0b">
-  <meta name="description" content="Live song requests for parties. Guests scan, request and vote. The DJ decides.">
+  <meta name="description" content="Song requests for your private party. Guests scan, request and vote. You decide what plays.">
   <title>QueueUp — let the room pick the next song</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="home">
-  <div class="glow" aria-hidden="true"></div>
+  <div class="aura playing" aria-hidden="true"></div>
   <main class="home-wrap">
     <div class="home-head">
-      <div class="brand-mark home-mark" id="logo"></div>
-      <h1>Let the room pick<br>the next song.</h1>
+      <div class="brand-mark home-mark" aria-hidden="true"><span class="bars"><i></i><i></i><i></i><i></i></span></div>
+      <h1><span class="w" style="animation-delay:.10s">Let</span> <span class="w" style="animation-delay:.16s">the</span> <span class="w" style="animation-delay:.22s">room</span> <span class="w" style="animation-delay:.28s">pick</span><br><span class="w" style="animation-delay:.34s">the</span> <span class="w hl" style="animation-delay:.40s">next song.</span></h1>
       <p>Guests scan a code, request songs and vote. You decide what plays.</p>
     </div>
 
@@ -32,18 +30,27 @@
     <div class="or"><span>or</span></div>
 
     <form class="home-card" id="startForm" autocomplete="off">
-      <label class="home-label" for="partyName">Host a party</label>
+      <label class="home-label" for="partyName">Host a private party</label>
       <div class="home-row">
         <input class="input" id="partyName" maxlength="40" placeholder="Party name" aria-label="Party name">
         <button class="btn btn-primary" type="submit">Start</button>
       </div>
-      <p class="note">Free. Works with your own Spotify Premium, or without Spotify.</p>
+      <label class="consent" id="consent">
+        <input type="checkbox" id="acceptTerms">
+        <span>I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy Policy</a>, and this is a private, non-commercial party.</span>
+      </label>
     </form>
 
     <div id="mine" hidden>
       <div class="section-head"><span>Your parties</span></div>
       <ul class="list" id="mineList"></ul>
     </div>
+
+    <footer class="foot">
+      <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a><br>
+      For private parties. Works with your own Spotify Premium, or without Spotify.<br>
+      QueueUp is not affiliated with Spotify.
+    </footer>
   </main>
   <script type="module" src="/home.js"></script>
 </body>

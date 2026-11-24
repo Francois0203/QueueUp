@@ -21,6 +21,7 @@ before(async () => {
     env: {
       ...process.env, PORT: String(PORT), DATA_DIR: dataDir, TRUST_PROXY: '1', PUBLIC_URL: '',
       SPOTIFY_ACCOUNTS_URL: fake.accountsUrl, SPOTIFY_API_URL: fake.apiUrl,
+      OPERATOR_NAME: 'Test Operator <b>Ltd</b>', OPERATOR_CONTACT: 'legal@example.test', GOVERNING_LAW: 'Testland',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -67,7 +68,7 @@ function browser(ip = `10.0.${Math.floor(++ipSeq / 250)}.${ipSeq % 250}`) {
 
 async function newParty(name = 'Test party') {
   const dj = browser();
-  const r = await dj('/api/rooms', { method: 'POST', body: { partyName: name } });
+  const r = await dj('/api/rooms', { method: 'POST', body: { partyName: name, acceptTerms: true } });
   assert.equal(r.status, 201);
   return { dj, code: r.data.code, pin: r.data.pin, base: `/api/r/${r.data.code}` };
 }
@@ -84,7 +85,8 @@ async function connectSpotify({ dj, base, code }) {
 
 test('pages and assets are served; source and traversal are not', async () => {
   const b = browser();
-  for (const p of ['/', '/p/ABCDE', '/dj/ABCDE', '/styles.css', '/home.js', '/guest.js', '/dj.js', '/shared.js', '/favicon.svg', '/healthz']) {
+  for (const p of ['/', '/p/ABCDE', '/dj/ABCDE', '/styles.css', '/home.js', '/guest.js', '/dj.js', '/shared.js', '/favicon.svg', '/healthz',
+    '/terms', '/privacy', '/fonts/inter-latin-wght-normal.woff2', '/fonts/OFL.txt']) {
     assert.equal((await b(p, { raw: true })).status, 200, p);
   }
   assert.equal((await b('/p/abcde', { raw: true })).status, 302);
@@ -213,14 +215,110 @@ test('#6 guessing party codes gets rate-limited, normal use does not', async () 
   for (let i = 0; i < 40; i++) assert.equal((await fan(`${base}/state`)).status, 200);
 });
 
-test('#7 state is saved atomically and survives restart-style reloads', async () => {
-  const { base } = await newParty('Persisted');
-  for (let i = 0; i < 20; i++) await browser()(`${base}/requests`, { method: 'POST', body: { title: `Song ${i}` } });
+test('#7 state is saved atomically, and encrypted at rest', async () => {
+  const party = await newParty('Persisted');
+  await connectSpotify(party);
+  for (let i = 0; i < 20; i++) await browser()(`${party.base}/requests`, { method: 'POST', body: { title: `Song ${i}` } });
   await new Promise(r => setTimeout(r, 1200));
   const files = fs.readdirSync(dataDir);
   assert.ok(files.includes('rooms.json'));
   assert.ok(!files.some(f => f.endsWith('.tmp')), 'no temp files left behind');
-  const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'rooms.json'), 'utf8'));
-  const room = saved.rooms.find(r => r.settings.partyName === 'Persisted');
-  assert.equal(room.requests.length, 20);
+  const raw = fs.readFileSync(path.join(dataDir, 'rooms.json'), 'utf8');
+  const file = JSON.parse(raw);
+  assert.equal(file.v, 1);
+  assert.ok(file.iv && file.tag && file.data, 'AES-GCM envelope');
+  for (const secret of [party.pin, 'Persisted', 'Song 1', 'refreshToken', 'accessToken']) {
+    assert.ok(!raw.includes(secret), `"${secret}" must not appear in plaintext`);
+  }
+});
+
+// ------------------------------------------------------------------ hardening
+
+test('hosts must accept the Terms; acceptance is required server-side', async () => {
+  const b = browser();
+  assert.equal((await b('/api/rooms', { method: 'POST', body: { partyName: 'x' } })).status, 400);
+  assert.equal((await b('/api/rooms', { method: 'POST', body: { partyName: 'x', acceptTerms: 'yes' } })).status, 400);
+  assert.equal((await b('/api/rooms', { method: 'POST', body: { partyName: 'x', acceptTerms: true } })).status, 201);
+});
+
+test('security headers: CSP, no framing, no sniffing', async () => {
+  for (const p of ['/', '/api/rooms/ZZZZZ', '/terms']) {
+    const r = await browser()(p, { raw: true });
+    const csp = r.headers.get('content-security-policy') || '';
+    assert.match(csp, /default-src 'self'/, p);
+    assert.match(csp, /script-src 'self'(;|$)/, `${p}: no inline/remote scripts`);
+    assert.match(csp, /frame-ancestors 'none'/);
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  }
+});
+
+test('cross-site POSTs are blocked', async () => {
+  const { base } = await newParty();
+  const r = await browser()(`${base}/requests`, { method: 'POST', body: { title: 'x' }, headers: { Origin: 'https://evil.example' } });
+  assert.equal(r.status, 403);
+  const ok = await browser()(`${base}/requests`, { method: 'POST', body: { title: 'x' }, headers: { Origin: B } });
+  assert.equal(ok.status, 201);
+});
+
+test('legal pages are filled with operator details, HTML-escaped', async () => {
+  const html = await (await browser()('/terms', { raw: true })).text();
+  assert.ok(html.includes('Test Operator &lt;b&gt;Ltd&lt;/b&gt;'), 'escaped');
+  assert.ok(!html.includes('<b>Ltd</b>'));
+  assert.ok(html.includes('Testland'));
+  assert.ok(!/\{\{\w+\}\}/.test(html), 'no unfilled placeholders');
+  const privacy = await (await browser()('/privacy', { raw: true })).text();
+  assert.ok(privacy.includes('legal@example.test'));
+});
+
+test('invisible and text-direction characters are stripped from names and titles', async () => {
+  const { base, dj } = await newParty();
+  await browser()(`${base}/requests`, { method: 'POST', body: { title: 'Good‮dab Song​', name: 'A\u0000l⁦ex' } });
+  const req = (await dj(`${base}/state`)).data.requests[0];
+  assert.equal(req.track.title, 'Gooddab Song');
+  assert.equal(req.by, 'Alex');
+});
+
+test('DJ can block a disruptive guest', async () => {
+  const { base, dj } = await newParty();
+  const troll = browser(), fan = browser();
+  const id = (await troll(`${base}/requests`, { method: 'POST', body: { title: 'Rude title' } })).data.id;
+  const fanId = (await fan(`${base}/requests`, { method: 'POST', body: { title: 'Nice song' } })).data.id;
+  await troll(`${base}/requests/${fanId}/vote`, { method: 'POST' });
+  assert.equal((await dj(`${base}/dj/requests/${id}/block`, { method: 'POST' })).status, 200);
+  const st = (await dj(`${base}/state`)).data;
+  assert.ok(!st.requests.some(r => r.id === id), 'their request is gone');
+  assert.equal(st.requests.find(r => r.id === fanId).votes, 1, 'their votes are removed');
+  assert.equal(st.blockedCount, 1);
+  assert.equal((await troll(`${base}/requests`, { method: 'POST', body: { title: 'again' } })).status, 403);
+  assert.equal((await troll(`${base}/requests/${fanId}/vote`, { method: 'POST' })).status, 403);
+  await dj(`${base}/dj/unblock-all`, { method: 'POST' });
+  assert.equal((await troll(`${base}/requests`, { method: 'POST', body: { title: 'sorry' } })).status, 201);
+});
+
+test('searches are cached and Spotify rate limits are respected', async () => {
+  const party = await newParty();
+  await connectSpotify(party);
+  const before = fake.state.searchCalls;
+  for (let i = 0; i < 5; i++) assert.equal((await browser()(`${party.base}/search?q=Same%20Song`)).status, 200);
+  assert.equal(fake.state.searchCalls - before, 1, 'one Spotify call for repeated searches');
+
+  fake.state.rateLimitSearch = 3;
+  try {
+    const first = await browser()(`${party.base}/search?q=new%20one`);
+    assert.equal(first.status, 429);
+    const calls = fake.state.searchCalls;
+    const second = await browser()(`${party.base}/search?q=another`);
+    assert.equal(second.status, 429);
+    assert.equal(fake.state.searchCalls, calls, 'backs off without calling Spotify again');
+    assert.equal((await party.dj(`${party.base}/state`)).data.spotify.connected, true, 'not disconnected');
+  } finally { fake.state.rateLimitSearch = 0; }
+});
+
+test('guests can withdraw only their own requests', async () => {
+  const { base } = await newParty();
+  const a = browser(), b = browser();
+  const id = (await a(`${base}/requests`, { method: 'POST', body: { title: 'Mine' } })).data.id;
+  assert.equal((await b(`${base}/requests/${id}`, { method: 'DELETE' })).status, 404);
+  assert.equal((await a(`${base}/requests/${id}`, { method: 'DELETE' })).status, 200);
 });

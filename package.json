@@ -2,6 +2,7 @@
   "name": "queueup",
   "version": "1.0.0",
   "private": true,
+  "license": "UNLICENSED",
   "description": "Live song requests and voting for parties, with optional Spotify integration.",
   "type": "module",
   "main": "server.js",

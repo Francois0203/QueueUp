@@ -7,12 +7,12 @@
   <meta name="robots" content="noindex">
   <title>DJ Console · QueueUp</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="dj">
+  <div class="aura" id="aura" aria-hidden="true"></div>
+
   <!-- Login -->
   <div class="login" id="login" hidden>
     <form class="login-card" id="loginForm">
@@ -34,13 +34,13 @@
       </div>
       <div class="chips">
         <span class="chip" id="chipGuests"><span class="d"></span><span>0 guests</span></span>
-        <span class="chip" id="chipSpotify"><span class="d"></span><span>Spotify</span></span>
+        <button class="chip" id="chipSpotify"><span class="d"></span><span>Spotify</span></button>
       </div>
     </header>
 
     <nav class="seg" id="tabs">
       <div class="seg-thumb" id="segThumb"></div>
-      <button data-tab="requests" class="on">Requests</button>
+      <button data-tab="requests" class="on">Requests<span id="newBadge"></span></button>
       <button data-tab="settings">Settings</button>
       <button data-tab="share">Share</button>
     </nav>
@@ -72,7 +72,7 @@
 
       <div class="section-head"><span>Requests</span><span class="count" id="pendingCount"></span></div>
       <ul class="list" id="pending"></ul>
-      <div class="empty" id="pendingEmpty" hidden><strong>All clear</strong>New requests will appear here instantly.</div>
+      <div class="empty" id="pendingEmpty" hidden><div class="empty-icon" id="pendingIcon"></div><strong>All clear</strong>New requests will appear here instantly.</div>
 
       <div id="playedWrap" hidden>
         <div class="section-head"><span>Played</span><span class="count" id="playedCount"></span></div>
@@ -129,6 +129,10 @@
           <div class="setting-text"><b>DJ PIN</b><span>Use it to run this party from another device</span></div>
           <button class="btn btn-sm" id="showPin">Show</button>
         </div>
+        <div class="setting" id="blockedRow" hidden>
+          <div class="setting-text"><b>Blocked guests</b><span id="blockedText"></span></div>
+          <button class="btn btn-sm" id="unblockAll">Unblock all</button>
+        </div>
       </div>
 
       <div class="card">
@@ -145,10 +149,15 @@
           <button class="btn btn-sm" id="logout">Sign out</button>
         </div>
         <div class="setting">
-          <div class="setting-text"><b>End party</b><span>Deletes the party for everyone. Guests' links stop working.</span></div>
+          <div class="setting-text"><b>End party</b><span>Deletes the party and all its data for everyone</span></div>
           <button class="btn btn-sm btn-danger" id="endParty">End</button>
         </div>
       </div>
+
+      <footer class="foot">
+        For private, non-commercial parties only. You're responsible for following Spotify's terms and any music licensing.<br>
+        <a href="/terms" target="_blank">Terms</a> · <a href="/privacy" target="_blank">Privacy</a> · QueueUp is not affiliated with Spotify.
+      </footer>
     </section>
 
     <!-- Share -->
@@ -164,22 +173,21 @@
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
         <button class="btn btn-sm btn-ghost" id="printQr">Print</button>
-        <a class="btn btn-sm btn-ghost" id="openGuest" target="_blank" rel="noopener" style="text-decoration:none">Open guest view</a>
+        <a class="btn btn-sm btn-ghost" id="openGuest" target="_blank" rel="noopener">Open guest view</a>
       </div>
-      <p class="note" style="text-align:center">Guests can also open the home page and enter code <b id="codeText"></b>.</p>
+      <p class="note" style="text-align:center">Guests can also open the home page and enter code <b id="codeText"></b>. Only share it with people you invited.</p>
     </section>
   </main>
 
   <div class="print-area" id="printArea"></div>
-
   <div class="scrim" id="scrim"></div>
 
   <!-- Welcome (after creating a party) -->
   <section class="sheet sheet-auto" id="welcome" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle" aria-hidden="true">
     <div class="sheet-grip"></div>
-    <div class="sheet-head"><h2 id="welcomeTitle">Your party is live</h2><button class="btn btn-icon" data-close aria-label="Close"></button></div>
+    <div class="sheet-head"><h2 id="welcomeTitle">Your party is live 🎉</h2><button class="btn btn-icon" data-close aria-label="Close"></button></div>
     <div class="sheet-body">
-      <p class="note" style="margin-top:0">Your DJ PIN. Save it — you need it to control this party from another device.</p>
+      <p class="note" style="margin-top:0;text-align:center">Your DJ PIN — you'll need it to control this party from another device.</p>
       <div class="pin-big" id="welcomePin"></div>
       <p class="note" style="text-align:center;margin:0 0 22px">Party code <b id="welcomeCode"></b></p>
       <ol class="steps">
@@ -187,30 +195,71 @@
         <li><span><b>Share the QR code</b> on a screen or print it.</span></li>
       </ol>
       <div style="display:flex;gap:8px">
-        <button class="btn" style="flex:1" id="welcomeShare">Show QR</button>
-        <button class="btn btn-primary" style="flex:1" id="welcomeSpotify">Connect Spotify</button>
+        <button class="btn" style="flex:1;height:50px" id="welcomeShare">Show QR</button>
+        <button class="btn btn-primary" style="flex:1;height:50px" id="welcomeSpotify">Connect Spotify</button>
       </div>
     </div>
   </section>
 
-  <!-- Spotify setup -->
-  <section class="sheet" id="spotifySheet" role="dialog" aria-modal="true" aria-labelledby="spTitle" aria-hidden="true">
+  <!-- Spotify setup wizard -->
+  <section class="sheet sheet-auto" id="spotifySheet" role="dialog" aria-modal="true" aria-labelledby="spTitle" aria-hidden="true">
     <div class="sheet-grip"></div>
     <div class="sheet-head"><h2 id="spTitle">Connect Spotify</h2><button class="btn btn-icon" data-close aria-label="Close"></button></div>
+    <div class="wiz-progress" aria-hidden="true"><i id="wizBar"></i></div>
     <div class="sheet-body">
-      <p class="warn">Needs <b>Spotify Premium</b>. You connect through your own free Spotify developer app — a one-time, 3-minute setup. QueueUp never sees your Spotify password.</p>
-      <ol class="steps">
-        <li><span>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify Developer Dashboard</a>, log in, and click <b>Create app</b>.</span></li>
-        <li><span>Give it any name and description. Under <b>Redirect URIs</b>, add exactly:
-          <span class="copy-box"><code id="redirectUri"></code><button class="btn btn-sm" type="button" id="copyRedirect">Copy</button></span></span></li>
-        <li><span>Tick <b>Web API</b>, accept the terms and <b>Save</b>.</span></li>
-        <li><span>Open the app's <b>Settings</b>, copy the <b>Client ID</b> and paste it below. You don't need the client secret.</span></li>
-      </ol>
-      <form id="spotifyForm" autocomplete="off">
-        <div class="field"><label for="clientId">Client ID</label><input class="input" id="clientId" maxlength="64" spellcheck="false" placeholder="32 letters and numbers"></div>
-        <button class="btn btn-primary" style="width:100%" type="submit">Connect with Spotify</button>
-      </form>
-      <p class="note" id="loopbackNote" hidden>Finish this step on the computer running QueueUp: Spotify only returns you to <code>127.0.0.1</code> when testing locally.</p>
+
+      <!-- Step 1: why -->
+      <div class="wiz-step on" data-step="0">
+        <div id="savedKey"></div>
+        <div class="wiz-icon" id="wizIcon0"></div>
+        <h3>One quick setup</h3>
+        <p>Spotify asks every DJ to create a free personal "app key". It takes about 3 minutes, and you only do it once — this device remembers it.</p>
+        <ul class="wiz-list" id="wizNeeds">
+          <li><span data-i="check"></span><span>A <b>Spotify Premium</b> account (needed for queueing)</span></li>
+          <li><span data-i="check"></span><span>Your Spotify login — QueueUp <b>never sees your password</b></span></li>
+          <li><span data-i="check"></span><span>Spotify open on the device that plays the music</span></li>
+        </ul>
+        <div class="wiz-nav"><button class="btn btn-primary" data-go="1">Let's go</button></div>
+      </div>
+
+      <!-- Step 2: create the app -->
+      <div class="wiz-step" data-step="1">
+        <h3>Create your key</h3>
+        <p>Open Spotify's developer site, log in, and fill in the form with these values. Tap to copy.</p>
+        <a class="btn btn-primary" style="width:100%;height:50px;margin-bottom:16px" href="https://developer.spotify.com/dashboard/create" target="_blank" rel="noopener"><span id="extIcon" style="display:inline-flex"></span>Open Spotify for Developers</a>
+        <div class="copy-field"><div><small>App name</small><code>QueueUp party</code></div><button class="btn btn-sm" data-copy="QueueUp party">Copy</button></div>
+        <div class="copy-field"><div><small>App description</small><code>Song requests for my parties</code></div><button class="btn btn-sm" data-copy="Song requests for my parties">Copy</button></div>
+        <div class="copy-field key"><div><small>Redirect URI — must match exactly</small><code id="redirectUri"></code></div><button class="btn btn-sm" id="copyRedirect">Copy</button></div>
+        <ul class="wiz-list" style="margin-top:14px">
+          <li><span data-i="check"></span><span>If you land on your dashboard instead of a form, click <b>Create app</b></span></li>
+          <li><span data-i="check"></span><span>Under "Which API/SDKs", tick <b>Web API</b></span></li>
+          <li><span data-i="check"></span><span>Tick the terms box and press <b>Save</b></span></li>
+        </ul>
+        <details class="help"><summary>First time on Spotify's developer site?</summary>
+          <p>Spotify asks you to accept its developer terms and may ask you to verify your email before you can create an app. That's normal — do that, then come back here.</p></details>
+        <div class="wiz-nav"><button class="btn" data-go="0">Back</button><button class="btn btn-primary" data-go="2">I've saved it</button></div>
+      </div>
+
+      <!-- Step 3: paste the client id -->
+      <div class="wiz-step" data-step="2">
+        <h3>Paste your Client ID</h3>
+        <p>On your new app's page, copy the <b>Client ID</b>. Or just copy the page's web address — we'll find the ID in it.</p>
+        <form id="spotifyForm" autocomplete="off">
+          <div class="input-wrap">
+            <input class="input" id="clientId" maxlength="300" spellcheck="false" placeholder="Paste here" aria-label="Spotify Client ID">
+            <button class="btn btn-sm" type="button" id="pasteBtn">Paste</button>
+          </div>
+          <p class="hint" id="idHint">It's 32 letters and numbers. You don't need the client secret.</p>
+          <label class="consent" style="margin-top:10px"><input type="checkbox" id="rememberKey" checked><span>Remember on this device for next time</span></label>
+          <p class="note" id="loopbackNote" hidden>Finish this step on the computer running QueueUp: when testing locally, Spotify can only send you back to <code>127.0.0.1</code>.</p>
+          <div class="wiz-nav"><button class="btn" type="button" data-go="1">Back</button><button class="btn btn-primary" type="submit" id="connectBtn" disabled>Connect Spotify</button></div>
+        </form>
+        <details class="help"><summary>Spotify shows an error?</summary>
+          <p><b>"INVALID_CLIENT: Invalid redirect URI"</b> — the Redirect URI in your Spotify app doesn't match. Go back one step, copy it again, and paste it in your app under Settings → Edit → Redirect URIs. Then Save.</p>
+          <p><b>"INVALID_CLIENT: Invalid client"</b> — the Client ID is wrong. Copy it again from your app's Settings.</p>
+          <p><b>Can't find your app?</b> Open <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> and click it.</p>
+        </details>
+      </div>
     </div>
   </section>
   <script type="module" src="/dj.js"></script>

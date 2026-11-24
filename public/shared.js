@@ -11,6 +11,12 @@ export const icons = {
   queue: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h12M4 12h12M4 18h7M19 15v6M16 18h6"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z"/></svg>',
   undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>',
+  block: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>',
+  external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
+  key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/></svg>',
+  spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/></svg>',
+  alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>',
 };
 
 export function h(tag, attrs = {}, ...children) {
@@ -28,24 +34,76 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 export async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: 'same-origin',
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    });
+  } catch {
+    throw Object.assign(new Error('You seem to be offline. Check your connection.'), { status: 0 });
+  }
   let data = {};
   try { data = await res.json(); } catch {}
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
   return data;
 }
 
 let toastHost;
 export function toast(msg, { error = false, ms = 2600 } = {}) {
   if (!toastHost) { toastHost = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' }); document.body.append(toastHost); }
-  const t = h('div', { class: 'toast' + (error ? ' error' : '') }, msg);
+  const t = h('div', { class: 'toast' + (error ? ' error' : '') }, h('span', { html: error ? icons.alert : icons.check, style: 'display:inline-flex' }), h('span', {}, msg));
   toastHost.append(t);
+  while (toastHost.children.length > 3) toastHost.firstChild.remove();
   setTimeout(() => { t.classList.add('out'); t.addEventListener('animationend', () => t.remove(), { once: true }); }, ms);
+}
+
+export const haptic = pattern => { try { navigator.vibrate?.(pattern); } catch {} };
+export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Animated number change: the old value rolls out, the new one rolls in. */
+export function rollTo(el, value) {
+  const next = String(value);
+  const prev = el.dataset.v;
+  if (prev === next) return;
+  el.dataset.v = next;
+  if (prev == null || reducedMotion()) { el.textContent = next; return; }
+  el.classList.add('roll');
+  el.classList.toggle('down', Number(next) < Number(prev));
+  const out = h('span', { class: 'r-out', 'aria-hidden': 'true' }, prev);
+  const inn = h('span', { class: 'r-in' }, next);
+  el.replaceChildren(out, inn);
+  inn.addEventListener('animationend', () => { if (el.dataset.v === next) el.replaceChildren(next); }, { once: true });
+}
+
+/** Little particle explosion from the centre of an element. */
+export function burst(el, n = 10) {
+  if (reducedMotion()) return;
+  const b = h('span', { class: 'burst', 'aria-hidden': 'true' });
+  for (let i = 0; i < n; i++) {
+    const p = h('i');
+    p.style.setProperty('--a', `${(360 / n) * i + Math.random() * 20}deg`);
+    p.style.setProperty('--d', `${26 + Math.random() * 18}px`);
+    b.append(p);
+  }
+  el.append(b);
+  setTimeout(() => b.remove(), 800);
+}
+
+/** Material-style ripple on buttons. */
+export function enableRipples(root = document) {
+  root.addEventListener('pointerdown', e => {
+    const btn = e.target.closest('.btn, .vote');
+    if (!btn || reducedMotion()) return;
+    const r = btn.getBoundingClientRect();
+    const size = Math.max(r.width, r.height);
+    const dot = h('span', { class: 'ripple' });
+    Object.assign(dot.style, { width: `${size}px`, height: `${size}px`, left: `${e.clientX - r.left - size / 2}px`, top: `${e.clientY - r.top - size / 2}px` });
+    btn.append(dot);
+    setTimeout(() => dot.remove(), 650);
+  });
 }
 
 /** Server-sent events with automatic reconnect. */
@@ -76,7 +134,7 @@ export function connect(base, onState, onStatus = () => {}, onEnded = () => {}) 
 
 /**
  * Keyed list reconciliation with FLIP animations: rows glide to their new positions,
- * new rows fade in, removed rows fade out.
+ * new rows fade in, removed rows fade out, rows that climb get a brief highlight.
  */
 export function renderList(ul, items, key, build, update) {
   const before = new Map();
@@ -88,7 +146,7 @@ export function renderList(ul, items, key, build, update) {
     const k = key(item);
     keep.add(k);
     let el = existing.get(k);
-    if (!el) { el = build(item); el.dataset.key = k; el.classList.add('enter'); el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true }); }
+    if (!el) { el = build(item); el.dataset.key = k; el.classList.add('enter'); el.addEventListener('animationend', () => el.classList.remove('enter', 'fresh'), { once: true }); }
     update(el, item);
     return el;
   });
@@ -100,7 +158,6 @@ export function renderList(ul, items, key, build, update) {
     }
   }
 
-  // Place in order (leaving rows stay where they are until they finish).
   let cursor = ul.firstChild;
   for (const el of ordered) {
     while (cursor && cursor.classList?.contains('leave')) cursor = cursor.nextSibling;
@@ -108,13 +165,17 @@ export function renderList(ul, items, key, build, update) {
     else cursor = cursor.nextSibling;
   }
 
-  // FLIP
+  if (reducedMotion()) return;
   for (const el of ordered) {
     const prev = before.get(el.dataset.key);
     if (prev == null) continue;
     const dy = prev - el.getBoundingClientRect().top;
     if (Math.abs(dy) < 1) continue;
-    el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 520, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+    el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 560, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+    if (dy > 0) { // moved up the list
+      el.classList.remove('rise'); void el.offsetWidth; el.classList.add('rise');
+      el.addEventListener('animationend', () => el.classList.remove('rise'), { once: true });
+    }
   }
 }
 
@@ -124,17 +185,44 @@ export function roomCode() {
   return m ? m[1].toUpperCase() : '';
 }
 
+// ---------------------------------------------------------------- Spotify attribution
+
+/** Spotify requires metadata and artwork to link back to Spotify. */
+export const spotifyUrl = track => track?.uri?.startsWith('spotify:track:') ? `https://open.spotify.com/track/${track.id}` : '';
+
+/**
+ * Official Spotify logo, if the operator placed it at /brand/spotify-logo.svg
+ * (download it from developer.spotify.com/design — we don't redraw trademarks).
+ * Falls back to the word "Spotify".
+ */
+export function spotifyLogo(cls = '') {
+  const img = h('img', { src: '/brand/spotify-logo.svg', alt: 'Spotify', class: cls });
+  img.addEventListener('error', () => img.replaceWith(h('b', {}, 'Spotify')), { once: true });
+  return img;
+}
+
 export function artEl(track, cls = 'art') {
   const box = h('div', { class: cls });
   setArt(box, track);
   return box;
 }
 
+/** Renders artwork. Spotify artwork is wrapped in a link to the track on Spotify. */
 export function setArt(box, track) {
   const src = track?.art || '';
-  if (box.dataset.src === src && box.firstChild) return;
+  const link = spotifyUrl(track);
+  if (box.dataset.src === src && box.dataset.link === link && box.firstChild) return;
   box.dataset.src = src;
-  box.replaceChildren(src ? h('img', { src, alt: '', loading: 'lazy', decoding: 'async' }) : h('span', { html: icons.note }));
+  box.dataset.link = link;
+  const img = src ? h('img', { src, alt: '', loading: 'lazy', decoding: 'async' }) : h('span', { html: icons.note });
+  if (link) {
+    box.replaceChildren(h('a', {
+      href: link, target: '_blank', rel: 'noopener', title: 'Open in Spotify', 'aria-label': `Open ${track.title} in Spotify`,
+      style: 'display:block;width:100%;height:100%', onclick: e => e.stopPropagation(),
+    }, img));
+  } else {
+    box.replaceChildren(img);
+  }
 }
 
 export function fmtTime(ms) {
