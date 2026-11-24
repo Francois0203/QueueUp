@@ -1,0 +1,2 @@
+.wrap { position: relative; display: inline-flex; overflow: hidden; font-variant-numeric: tabular-nums; vertical-align: bottom; }
+.digit { display: inline-block; }

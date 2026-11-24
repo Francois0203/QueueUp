@@ -1,0 +1,4 @@
+.center { min-height: 100dvh; display: grid; place-items: center; padding: 20px; }
+.card { max-width: 340px; text-align: center; display: flex; flex-direction: column; align-items: center; }
+.card h1 { font-size: 24px; letter-spacing: -0.03em; margin: 22px 0 6px; }
+.card p { color: var(--muted); margin: 0 0 26px; }

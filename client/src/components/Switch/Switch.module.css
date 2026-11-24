@@ -1,0 +1,8 @@
+.track {
+  flex: none; position: relative; width: 50px; height: 30px; padding: 3px; border-radius: 999px;
+  display: flex; justify-content: flex-start; background: var(--surface-3);
+  transition: background-color .3s ease;
+}
+.on { justify-content: flex-end; background: var(--accent); }
+.knob { display: block; width: 24px; height: 24px; border-radius: 999px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+.on .knob { background: var(--accent-ink); }

@@ -1,0 +1,39 @@
+.item { position: relative; list-style: none; }
+
+.row {
+  position: relative; border-radius: var(--radius); background: var(--bg-raised); border: 1px solid var(--line);
+  transition: border-color .4s ease, box-shadow .6s ease, background-color .4s ease;
+  touch-action: pan-y;
+}
+.main { display: flex; align-items: center; gap: 14px; padding: 10px 12px 10px 10px; }
+.queued { background: #0d0d10; }
+.result { background: transparent; border-color: transparent; }
+.result:hover { background: var(--surface); }
+.clickable { cursor: pointer; }
+.mine { border-color: var(--line-strong); }
+.fresh { animation: fresh 2.4s ease-out .2s; }
+@keyframes fresh { 0%, 30% { background: #1a1d10; border-color: rgba(var(--accent-rgb), .5); } }
+.rising { border-color: rgba(var(--accent-rgb), .55); box-shadow: 0 12px 34px -14px rgba(var(--accent-rgb), .55); }
+
+.meta { min-width: 0; flex: 1; }
+.title { font-weight: 580; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.006em; }
+.sub { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.artist { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.detail { flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dot { opacity: .5; }
+.explicit {
+  flex: none; display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 3px;
+  background: var(--faint); color: var(--bg); font-size: 9px; font-weight: 800;
+}
+.actions { display: flex; align-items: center; gap: 4px; flex: none; }
+
+.more { overflow: hidden; }
+.moreInner { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; padding: 0 12px 12px; }
+
+/* swipe reveal */
+.under { position: absolute; inset: 1px; border-radius: var(--radius); display: flex; align-items: center; justify-content: space-between; padding: 0 22px; overflow: hidden; }
+.reveal { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; }
+.revealRight { margin-right: auto; }
+.revealLeft { margin-left: auto; }
+.accent { color: var(--accent); }
+.danger { color: var(--danger); }

@@ -1,0 +1,16 @@
+.field {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 10px 10px 10px 14px; margin-bottom: 8px; border-radius: 16px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.text small { display: block; font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .07em; }
+.text code { display: block; font-family: var(--mono); font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.important { border-color: rgba(var(--accent-rgb), .4); background: rgba(var(--accent-rgb), .05); }
+.important code { white-space: normal; word-break: break-all; }
+.btn {
+  display: inline-flex; align-items: center; height: 34px; padding: 0 13px; border-radius: 999px; overflow: hidden;
+  background: var(--surface-2); font-size: 13px; font-weight: 580; transition: background-color .25s, color .25s;
+}
+.btn:hover { background: var(--surface-3); }
+.done, .done:hover { background: var(--accent); color: var(--accent-ink); }
+.btnInner { display: inline-flex; align-items: center; gap: 6px; }

@@ -1,0 +1,40 @@
+.hero { padding: 26px 0 6px; text-align: center; }
+.stage { position: relative; width: min(66vw, 260px); aspect-ratio: 1; margin: 0 auto; }
+/* glow lives BEHIND the artwork */
+.stage::before {
+  content: ''; position: absolute; inset: 6%; border-radius: 30%;
+  background: radial-gradient(closest-side, rgba(var(--accent-rgb), .38), rgba(var(--violet-rgb), .22) 60%, transparent);
+  filter: blur(34px); opacity: 0; transform: scale(.9); transition: opacity 1.2s ease;
+}
+.playing::before { opacity: .95; animation: breathe 3.4s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.1); opacity: .6; } }
+.artWrap { position: absolute; inset: 0; }
+
+.text { margin-top: 28px; }
+.label {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 580;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--accent);
+}
+.title { margin: 9px 0 3px; font-size: 26px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; text-wrap: balance; }
+.idle { color: var(--muted); font-weight: 560; font-size: 19px; }
+.artist { color: var(--muted); font-size: 15px; }
+.link { margin-top: 14px; }
+
+.eq { display: inline-flex; gap: 2px; height: 10px; align-items: flex-end; }
+.eq i { width: 2px; height: 3px; border-radius: 1px; background: currentColor; }
+.eqOn i { animation: eq .9s ease-in-out infinite alternate; }
+.eqOn i:nth-child(2) { animation-delay: -.35s; }
+.eqOn i:nth-child(3) { animation-delay: -.65s; }
+@keyframes eq { from { height: 3px; } to { height: 10px; } }
+
+.progress { display: flex; align-items: center; gap: 10px; max-width: 300px; margin: 22px auto 0; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.track { flex: 1; height: 4px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--text), var(--accent)); }
+
+.mini { display: flex; align-items: center; gap: 14px; padding: 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); margin-top: 18px; }
+.miniMeta { flex: 1; min-width: 0; }
+.miniLabel { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 580; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+.miniTitle { font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.miniSub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (min-width: 700px) { .stage { width: 280px; } }

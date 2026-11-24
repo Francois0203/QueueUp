@@ -1,0 +1,8 @@
+.word { font-weight: 650; color: var(--text); }
+.open {
+  display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px 7px 11px; border-radius: 999px;
+  background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 560; text-decoration: none;
+  border: 1px solid var(--line); transition: background .25s, color .25s, border-color .25s;
+}
+.open:hover { background: var(--surface-2); color: var(--text); border-color: var(--line-strong); }
+.attr { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--faint); font-size: 11px; padding: 16px 0 4px; text-decoration: none; }

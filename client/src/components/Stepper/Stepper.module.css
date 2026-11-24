@@ -1,0 +1,2 @@
+.stepper { flex: none; display: flex; align-items: center; gap: 4px; }
+.value { min-width: 34px; text-align: center; font-weight: 650; font-variant-numeric: tabular-nums; display: inline-flex; justify-content: center; }

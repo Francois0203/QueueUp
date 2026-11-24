@@ -1,0 +1,9 @@
+.empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+.empty strong { display: block; color: var(--text); font-weight: 600; margin-bottom: 4px; }
+.empty p { margin: 0; }
+.icon {
+  width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 18px; display: grid; place-items: center;
+  background: var(--surface); border: 1px solid var(--line); color: var(--accent);
+}
+.icon svg { animation: float 3.2s ease-in-out infinite; }
+@keyframes float { 50% { transform: translateY(-4px); } }

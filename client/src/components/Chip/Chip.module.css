@@ -1,0 +1,9 @@
+.chip {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 13px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); font-size: 12px; font-weight: 560; color: var(--muted); white-space: nowrap;
+}
+.label { display: inline-flex; align-items: center; }
+.clickable { transition: background-color .25s, color .25s; }
+.clickable:hover { background: var(--surface-2); color: var(--text); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); transition: background-color .4s, box-shadow .4s; }
+.on { background: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .16); }

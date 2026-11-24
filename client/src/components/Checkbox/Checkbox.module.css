@@ -1,0 +1,12 @@
+.wrap { display: flex; gap: 11px; align-items: flex-start; font-size: 13px; color: var(--muted); cursor: pointer; line-height: 1.5; }
+.wrap a { color: var(--text); }
+.box {
+  flex: none; width: 21px; height: 21px; margin-top: 1px; border-radius: 7px; border: 1.5px solid var(--faint);
+  display: grid; place-items: center; transition: background-color .2s, border-color .2s;
+}
+.box svg { width: 15px; height: 15px; fill: none; stroke: var(--accent-ink); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.on { background: var(--accent); border-color: var(--accent); }
+.wrap input:focus-visible + .box { outline: 2px solid var(--accent); outline-offset: 2px; }
+.invalid .box { border-color: var(--danger); }
+.invalid .text { color: var(--danger); }
+.text { min-width: 0; }

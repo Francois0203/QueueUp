@@ -1,0 +1,20 @@
+.aura { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.orb { position: absolute; inset: 0; }
+.blob { position: absolute; width: 95vmax; height: 95vmax; border-radius: 50%; filter: blur(30px); }
+.a {
+  top: -58vmax; left: -34vmax;
+  background: radial-gradient(closest-side, rgba(var(--accent-rgb), .17), transparent 70%);
+  animation: driftA 18s ease-in-out infinite alternate;
+}
+.b {
+  top: -46vmax; right: -44vmax;
+  background: radial-gradient(closest-side, rgba(var(--violet-rgb), .2), transparent 70%);
+  animation: driftB 23s ease-in-out infinite alternate;
+}
+/* faint film grain for depth */
+.grain {
+  position: absolute; inset: 0; opacity: .035; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@keyframes driftA { to { transform: translate3d(14vmax, 9vmax, 0) scale(1.15); } }
+@keyframes driftB { to { transform: translate3d(-12vmax, 13vmax, 0) scale(1.1); } }

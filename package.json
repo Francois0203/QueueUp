@@ -3,18 +3,37 @@
   "version": "1.0.0",
   "private": true,
   "license": "UNLICENSED",
-  "description": "Live song requests and voting for parties, with optional Spotify integration.",
+  "description": "Live song requests and voting for private parties, on Firebase.",
   "type": "module",
-  "main": "server.js",
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.js",
-    "dev": "node --watch --env-file-if-exists=.env server.js",
-    "test": "node --test \"test/*.test.mjs\""
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/dev.mjs",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p client",
+    "test": "firebase emulators:exec --project demo-queueup-test --only auth,firestore,functions \"node --test test/*.test.mjs\"",
+    "deploy": "npm run build && firebase deploy"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
-    "qrcode": "^1.5.4"
+    "firebase": "^13.4.0",
+    "motion": "^14.14.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "firebase-tools": "^15.37.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6"
   }
 }

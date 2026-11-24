@@ -1,324 +1,301 @@
-// End-to-end tests: starts a real QueueUp server against a fake Spotify.
+// End-to-end tests against the Firebase emulators (Auth, Firestore, Functions) and a fake Spotify.
+// Run with: npm test   (firebase emulators:exec starts everything, then runs this file)
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { startFakeSpotify } from './fake-spotify.mjs';
 
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const PORT = 40000 + Math.floor(Math.random() * 20000);
-const B = `http://127.0.0.1:${PORT}`;
-let fake, proc, dataDir, ipSeq = 0;
+const PROJECT = 'demo-queueup-test';
+const FN = `http://127.0.0.1:5001/${PROJECT}/europe-west1/api`;
+const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/documents`;
+const AUTH = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake';
 
-before(async () => {
-  fake = await startFakeSpotify();
-  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queueup-test-'));
-  proc = spawn(process.execPath, ['server.js'], {
-    cwd: ROOT,
-    env: {
-      ...process.env, PORT: String(PORT), DATA_DIR: dataDir, TRUST_PROXY: '1', PUBLIC_URL: '',
-      SPOTIFY_ACCOUNTS_URL: fake.accountsUrl, SPOTIFY_API_URL: fake.apiUrl,
-      OPERATOR_NAME: 'Test Operator <b>Ltd</b>', OPERATOR_CONTACT: 'legal@example.test', GOVERNING_LAW: 'Testland',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let log = '';
-  await new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('server did not start:\n' + log)), 8000);
-    const onData = d => { log += d; if (log.includes('QueueUp is live')) { clearTimeout(t); resolve(); } };
-    proc.stdout.on('data', onData);
-    proc.stderr.on('data', onData);
-  });
-});
+// Admin access to inspect data (bypasses rules; emulators:exec sets FIRESTORE_EMULATOR_HOST).
+const require = createRequire(new URL('../functions/package.json', import.meta.url));
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+initializeApp({ projectId: PROJECT });
+const admin = getFirestore();
 
-after(async () => {
-  proc?.kill();
-  await fake?.close();
-  fs.rmSync(dataDir, { recursive: true, force: true });
-});
+let fake;
+before(async () => { fake = await startFakeSpotify({ port: 8799 }); });
+after(async () => { await fake?.close(); });
 
-/** A browser: keeps its own cookies and its own (proxy-reported) IP. */
-function browser(ip = `10.0.${Math.floor(++ipSeq / 250)}.${ipSeq % 250}`) {
-  const jar = new Map();
-  const call = async (p, { method = 'GET', body, headers = {}, raw = false } = {}) => {
-    const res = await fetch(B + p, {
-      method, redirect: 'manual',
-      headers: {
-        'X-Forwarded-For': `6.6.6.${Math.floor(Math.random() * 250)}, ${ip}`, // first entry is forgeable
-        Cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; '),
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...headers,
-      },
-      body: body ? JSON.stringify(body) : undefined,
+/** A browser: an anonymous Firebase user that calls the API like the app does. */
+async function browser() {
+  const r = await fetch(AUTH, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }) });
+  const { idToken, localId } = await r.json();
+  const call = async (op, data = {}) => {
+    const res = await fetch(FN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify({ data: { op, ...data } }),
     });
-    for (const c of res.headers.getSetCookie()) {
-      const [kv] = c.split(';'); const i = kv.indexOf('=');
-      jar.set(kv.slice(0, i), kv.slice(i + 1));
-    }
-    if (raw) return res;
-    let data = null; try { data = await res.json(); } catch {}
-    return { status: res.status, data, headers: res.headers };
+    const j = await res.json();
+    return j.error ? { error: j.error.status, message: j.error.message } : { data: j.result };
   };
-  call.ip = ip;
+  /** Firestore REST read as this user: the security rules apply. */
+  call.read = async path => (await fetch(`${FS}/${path}`, { headers: { Authorization: `Bearer ${idToken}` } })).status;
+  call.write = async path => (await fetch(`${FS}/${path}`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { hacked: { booleanValue: true } } }),
+  })).status;
+  call.uid = localId;
   return call;
 }
 
 async function newParty(name = 'Test party') {
-  const dj = browser();
-  const r = await dj('/api/rooms', { method: 'POST', body: { partyName: name, acceptTerms: true } });
-  assert.equal(r.status, 201);
-  return { dj, code: r.data.code, pin: r.data.pin, base: `/api/r/${r.data.code}` };
+  const dj = await browser();
+  const r = await dj('createParty', { partyName: name, acceptTerms: true });
+  assert.ok(r.data, JSON.stringify(r));
+  return { dj, code: r.data.code, pin: r.data.pin };
 }
 
-/** Runs the real PKCE login against the fake Spotify. */
-async function connectSpotify({ dj, base, code }) {
-  const start = await dj(`${base}/dj/spotify/start`, { method: 'POST', body: { clientId: 'b'.repeat(32) } });
+const requestsOf = async code => (await admin.collection(`parties/${code}/requests`).get()).docs.map(d => ({ id: d.id, ...d.data() }));
+
+async function connectSpotify({ dj, code }) {
+  const start = await dj('spotifyStart', { code, clientId: 'b'.repeat(32) });
   const state = new URL(start.data.url).searchParams.get('state');
-  const cb = await dj(`/auth/spotify/callback?state=${state}&code=authcode`, { raw: true });
-  assert.equal(cb.headers.get('location'), `/dj/${code}?spotify=connected`);
+  const done = await dj('spotifyComplete', { code, state, authCode: 'authcode' });
+  assert.deepEqual(done, { data: { ok: true } });
 }
 
-// ------------------------------------------------------------------ basics
+// ------------------------------------------------------------------ hosting, terms, access rules
 
-test('pages and assets are served; source and traversal are not', async () => {
-  const b = browser();
-  for (const p of ['/', '/p/ABCDE', '/dj/ABCDE', '/styles.css', '/home.js', '/guest.js', '/dj.js', '/shared.js', '/favicon.svg', '/healthz',
-    '/terms', '/privacy', '/fonts/inter-latin-wght-normal.woff2', '/fonts/OFL.txt']) {
-    assert.equal((await b(p, { raw: true })).status, 200, p);
+test('hosts must accept the Terms; acceptance is recorded', async () => {
+  const b = await browser();
+  assert.equal((await b('createParty', { partyName: 'x' })).error, 'INVALID_ARGUMENT');
+  assert.equal((await b('createParty', { partyName: 'x', acceptTerms: 'yes' })).error, 'INVALID_ARGUMENT');
+  const ok = await b('createParty', { partyName: 'x', acceptTerms: true });
+  assert.match(ok.data.code, /^[A-Z2-9]{5}$/);
+  assert.match(ok.data.pin, /^\d{6}$/);
+  const dj = (await admin.doc(`parties/${ok.data.code}/private/dj`).get()).data();
+  assert.equal(dj.termsAccepted.uid, b.uid);
+  assert.ok(dj.termsAccepted.version);
+});
+
+test('Firestore rules: read-only, DJ data for DJs, secrets for nobody', async () => {
+  const { dj, code } = await newParty();
+  const guest = await browser();
+  assert.equal(await guest.read(`parties/${code}`), 200, 'party is readable');
+  assert.equal(await guest.read(`parties/${code}/requests`), 200, 'requests are readable');
+  assert.equal(await guest.read(`parties/${code}/private/dj`), 403, 'guest cannot read DJ data');
+  assert.equal(await dj.read(`parties/${code}/private/dj`), 200, 'DJ can read DJ data');
+  assert.equal(await guest.read(`parties/${code}/requestMeta`), 403, 'guest cannot read requester names');
+  assert.equal(await dj.read(`parties/${code}/requestMeta`), 200);
+  for (const who of [guest, dj]) {
+    assert.equal(await who.read(`parties/${code}/private/secrets`), 403, 'nobody reads Spotify tokens');
+    assert.equal(await who.read(`parties/${code}/guests`), 403);
+    assert.equal(await who.write(`parties/${code}`), 403, 'no direct writes');
+    assert.equal(await who.write(`parties/${code}/requests/x`), 403);
   }
-  assert.equal((await b('/p/abcde', { raw: true })).status, 302);
-  assert.equal((await b('/server.js', { raw: true })).status, 404);
-  assert.equal((await b('/..%2fserver.js', { raw: true })).status, 404);
+  assert.equal(await guest.read('parties'), 403, 'cannot list all parties');
 });
 
 test('parties are isolated, and only their DJ controls them', async () => {
   const a = await newParty('A'), b = await newParty('B');
   assert.notEqual(a.code, b.code);
-  assert.equal((await a.dj(`${a.base}/dj/me`)).data.dj, true);
-  assert.equal((await a.dj(`${b.base}/dj/me`)).data.dj, false);
-
-  const guest = browser();
-  assert.equal((await guest(`${a.base}/requests`, { method: 'POST', body: { title: 'Only in A' } })).status, 201);
-  assert.equal((await guest(`${b.base}/state`)).data.requests.length, 0);
-
-  const gs = (await guest(`${a.base}/state`)).data;
-  assert.equal(gs.pin, undefined, 'guests never see the PIN');
-  assert.equal(gs.spotify.redirectUri, undefined);
-  assert.equal((await guest(`${a.base}/dj/settings`, { method: 'PATCH', body: { partyName: 'x' } })).status, 401);
-  assert.equal((await guest(`${a.base}/dj/end`, { method: 'POST' })).status, 401);
+  const guest = await browser();
+  assert.ok((await guest('request', { code: a.code, title: 'Only in A' })).data);
+  assert.equal((await requestsOf(b.code)).length, 0);
+  assert.equal((await guest('settings', { code: a.code, patch: { partyName: 'x' } })).error, 'PERMISSION_DENIED');
+  assert.equal((await a.dj('settings', { code: b.code, patch: { partyName: 'x' } })).error, 'PERMISSION_DENIED');
+  assert.equal((await guest('end', { code: a.code })).error, 'PERMISSION_DENIED');
+  assert.equal((await guest('request', { code: 'ZZZZZ', title: 'x' })).error, 'NOT_FOUND');
 });
 
 test('votes, duplicate merging and per-guest limits', async () => {
-  const { base } = await newParty();
-  const g1 = browser(), g2 = browser();
-  const id = (await g1(`${base}/requests`, { method: 'POST', body: { title: 'Dreams', artist: 'Fleetwood Mac' } })).data.id;
-  assert.equal((await g2(`${base}/requests`, { method: 'POST', body: { title: 'dreams', artist: 'fleetwood mac' } })).data.merged, true);
-  assert.equal((await g2(`${base}/state`)).data.requests[0].votes, 2);
-  assert.equal((await g2(`${base}/requests/${id}/vote`, { method: 'POST' })).data.votes, 1);
-  for (const t of ['b', 'c']) await g1(`${base}/requests`, { method: 'POST', body: { title: t } });
-  assert.equal((await g1(`${base}/requests`, { method: 'POST', body: { title: 'd' } })).status, 429);
+  const { code } = await newParty();
+  const g1 = await browser(), g2 = await browser();
+  const { id } = (await g1('request', { code, title: 'Dreams', artist: 'Fleetwood Mac' })).data;
+  const merged = await g2('request', { code, title: 'dreams', artist: 'fleetwood mac' });
+  assert.equal(merged.data.merged, true);
+  let reqs = await requestsOf(code);
+  assert.equal(reqs.length, 1);
+  assert.deepEqual(new Set(reqs[0].votes), new Set([g1.uid, g2.uid]));
+  assert.equal((await g2('vote', { code, id, on: false })).data.votes, 1);
+  assert.equal((await g2('vote', { code, id, on: true })).data.votes, 2);
+  assert.equal((await g2('vote', { code, id, on: true })).data.votes, 2, 'voting twice counts once');
+  for (const t of ['b', 'c']) assert.ok((await g1('request', { code, title: t })).data);
+  assert.equal((await g1('request', { code, title: 'd' })).error, 'RESOURCE_EXHAUSTED');
 });
 
-test('ending a party removes it for everyone, other parties live on', async () => {
-  const a = await newParty(), b = await newParty();
-  assert.equal((await a.dj(`${a.base}/dj/end`, { method: 'POST' })).status, 200);
-  assert.equal((await browser()(`${a.base}/state`)).status, 404);
-  assert.equal((await browser()(`${b.base}/state`)).status, 200);
+test('guests can withdraw only their own requests', async () => {
+  const { code } = await newParty();
+  const a = await browser(), b = await browser();
+  const { id } = (await a('request', { code, title: 'Mine' })).data;
+  assert.equal((await b('withdraw', { code, id })).error, 'NOT_FOUND');
+  assert.deepEqual((await a('withdraw', { code, id })).data, { ok: true });
+  assert.equal((await requestsOf(code)).length, 0);
 });
 
-// ------------------------------------------------------------------ review fixes
-
-test('#1 a guest cannot fake song details or dodge the explicit filter', async () => {
-  const party = await newParty();
-  await connectSpotify(party);
-  const { dj, base } = party;
-  const guest = browser();
-
-  // Unknown / forged song ids are rejected outright.
-  const forged = await guest(`${base}/requests`, { method: 'POST', body: {
-    track: { id: 'forged', uri: 'spotify:track:SOMETHING_ELSE', title: 'Happy Birthday', explicit: false } } });
-  assert.equal(forged.status, 400);
-
-  // After a real search, the server uses its own copy, whatever the browser claims.
-  const { results } = (await guest(`${base}/search?q=dreams`)).data;
-  const dreams = results.find(t => t.title === 'Dreams');
-  const r = await guest(`${base}/requests`, { method: 'POST', body: {
-    track: { ...dreams, title: 'Happy Birthday', uri: 'spotify:track:SOMETHING_ELSE' } } });
-  assert.equal(r.status, 201);
-  const req = (await dj(`${base}/state`)).data.requests.find(x => x.id === r.data.id);
-  assert.equal(req.track.title, 'Dreams');
-  assert.equal(req.track.uri, dreams.uri);
-
-  // Queueing sends the real URI to Spotify.
-  assert.equal((await dj(`${base}/dj/requests/${req.id}/queue`, { method: 'POST' })).status, 200);
-  assert.equal(fake.state.queued.at(-1), dreams.uri);
-
-  // Explicit filter: hidden from search, and a remembered explicit id is refused.
-  const explicit = fake.tracks.find(t => t.explicit);
-  await dj(`${base}/dj/settings`, { method: 'PATCH', body: { allowExplicit: false } });
-  const filtered = (await guest(`${base}/search?q=rude`)).data.results;
-  assert.ok(!filtered.some(t => t.id === explicit.id), 'explicit hidden from search');
-  const sneaky = await browser()(`${base}/requests`, { method: 'POST', body: { trackId: explicit.id, track: { explicit: false } } });
-  assert.equal(sneaky.status, 403);
-});
-
-test('#2 Spotify connection survives expired tokens and parallel calls', async () => {
-  const party = await newParty();
-  await connectSpotify(party);
-  fake.expireAllTokens(); // every outstanding access token now rejected
-  fake.state.refreshCalls = 0;
-  const guests = [1, 2, 3, 4, 5, 6].map(() => browser());
-  const res = await Promise.all(guests.map(g => g(`${party.base}/search?q=dreams`)));
-  assert.ok(res.every(r => r.status === 200), 'all searches succeed');
-  assert.equal(fake.state.refreshCalls, 1, 'one shared refresh');
-  assert.equal((await party.dj(`${party.base}/state`)).data.spotify.connected, true);
-});
-
-test('#3 Spotify login only completes in the DJ\'s own signed-in browser', async () => {
-  const { dj, base, code } = await newParty();
-  const start = await dj(`${base}/dj/spotify/start`, { method: 'POST', body: { clientId: 'c'.repeat(32) } });
-  const state = new URL(start.data.url).searchParams.get('state');
-  const u = new URL(start.data.url);
-  assert.equal(u.searchParams.get('code_challenge_method'), 'S256');
-  assert.ok(!u.searchParams.has('client_secret'));
-
-  const victim = browser(); // not this party's DJ
-  const cb = await victim(`/auth/spotify/callback?state=${state}&code=authcode`, { raw: true });
-  assert.equal(cb.headers.get('location'), `/dj/${code}?spotify=signin`);
-  assert.equal((await dj(`${base}/state`)).data.spotify.connected, false);
-  // The state is single-use: replaying it fails.
-  const replay = await dj(`/auth/spotify/callback?state=${state}&code=authcode`, { raw: true });
-  assert.equal(replay.headers.get('location'), '/?spotify=expired');
-});
-
-test('#4 rate limits use the proxy-added IP, not the forgeable first entry', async () => {
-  const { base, pin } = await newParty();
-  const attacker = browser('203.0.113.7'); // forged first XFF entry changes every request
-  for (let i = 0; i < 8; i++) {
-    assert.equal((await attacker(`${base}/dj/login`, { method: 'POST', body: { pin: '000000' } })).status, 401);
-  }
-  assert.equal((await attacker(`${base}/dj/login`, { method: 'POST', body: { pin: '000000' } })).status, 429);
-  // #6: the attacker can't lock the real DJ out from another device.
-  assert.equal((await browser()(`${base}/dj/login`, { method: 'POST', body: { pin } })).status, 200);
-});
-
-test('#6 guessing party codes gets rate-limited, normal use does not', async () => {
-  const guesser = browser();
-  const statuses = [];
-  for (let i = 0; i < 25; i++) statuses.push((await guesser(`/api/r/ZZZZ${'ABCDEFGHJK'[i % 10]}/state`)).status);
-  assert.ok(statuses.includes(429), 'misses are limited');
-  const { base } = await newParty();
-  const fan = browser();
-  for (let i = 0; i < 40; i++) assert.equal((await fan(`${base}/state`)).status, 200);
-});
-
-test('#7 state is saved atomically, and encrypted at rest', async () => {
-  const party = await newParty('Persisted');
-  await connectSpotify(party);
-  for (let i = 0; i < 20; i++) await browser()(`${party.base}/requests`, { method: 'POST', body: { title: `Song ${i}` } });
-  await new Promise(r => setTimeout(r, 1200));
-  const files = fs.readdirSync(dataDir);
-  assert.ok(files.includes('rooms.json'));
-  assert.ok(!files.some(f => f.endsWith('.tmp')), 'no temp files left behind');
-  const raw = fs.readFileSync(path.join(dataDir, 'rooms.json'), 'utf8');
-  const file = JSON.parse(raw);
-  assert.equal(file.v, 1);
-  assert.ok(file.iv && file.tag && file.data, 'AES-GCM envelope');
-  for (const secret of [party.pin, 'Persisted', 'Song 1', 'refreshToken', 'accessToken']) {
-    assert.ok(!raw.includes(secret), `"${secret}" must not appear in plaintext`);
-  }
-});
-
-// ------------------------------------------------------------------ hardening
-
-test('hosts must accept the Terms; acceptance is required server-side', async () => {
-  const b = browser();
-  assert.equal((await b('/api/rooms', { method: 'POST', body: { partyName: 'x' } })).status, 400);
-  assert.equal((await b('/api/rooms', { method: 'POST', body: { partyName: 'x', acceptTerms: 'yes' } })).status, 400);
-  assert.equal((await b('/api/rooms', { method: 'POST', body: { partyName: 'x', acceptTerms: true } })).status, 201);
-});
-
-test('security headers: CSP, no framing, no sniffing', async () => {
-  for (const p of ['/', '/api/rooms/ZZZZZ', '/terms']) {
-    const r = await browser()(p, { raw: true });
-    const csp = r.headers.get('content-security-policy') || '';
-    assert.match(csp, /default-src 'self'/, p);
-    assert.match(csp, /script-src 'self'(;|$)/, `${p}: no inline/remote scripts`);
-    assert.match(csp, /frame-ancestors 'none'/);
-    assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
-    assert.equal(r.headers.get('x-frame-options'), 'DENY');
-  }
-});
-
-test('cross-site POSTs are blocked', async () => {
-  const { base } = await newParty();
-  const r = await browser()(`${base}/requests`, { method: 'POST', body: { title: 'x' }, headers: { Origin: 'https://evil.example' } });
-  assert.equal(r.status, 403);
-  const ok = await browser()(`${base}/requests`, { method: 'POST', body: { title: 'x' }, headers: { Origin: B } });
-  assert.equal(ok.status, 201);
-});
-
-test('legal pages are filled with operator details, HTML-escaped', async () => {
-  const html = await (await browser()('/terms', { raw: true })).text();
-  assert.ok(html.includes('Test Operator &lt;b&gt;Ltd&lt;/b&gt;'), 'escaped');
-  assert.ok(!html.includes('<b>Ltd</b>'));
-  assert.ok(html.includes('Testland'));
-  assert.ok(!/\{\{\w+\}\}/.test(html), 'no unfilled placeholders');
-  const privacy = await (await browser()('/privacy', { raw: true })).text();
-  assert.ok(privacy.includes('legal@example.test'));
-});
-
-test('invisible and text-direction characters are stripped from names and titles', async () => {
-  const { base, dj } = await newParty();
-  await browser()(`${base}/requests`, { method: 'POST', body: { title: 'Good‮dab Song​', name: 'A\u0000l⁦ex' } });
-  const req = (await dj(`${base}/state`)).data.requests[0];
+test('invisible and text-direction characters are stripped', async () => {
+  const { code } = await newParty();
+  await (await browser())('request', { code, title: 'Good‮dab Song​', name: 'A\u0000l⁦ex' });
+  const [req] = await requestsOf(code);
   assert.equal(req.track.title, 'Gooddab Song');
-  assert.equal(req.by, 'Alex');
+  assert.equal(req.byName, 'Alex');
+});
+
+test('hiding guest names removes them from the public data, DJ still sees them', async () => {
+  const { dj, code } = await newParty();
+  const { id } = (await (await browser())('request', { code, title: 'Song', name: 'Ana' })).data;
+  await dj('settings', { code, patch: { showNames: false } });
+  assert.equal((await admin.doc(`parties/${code}/requests/${id}`).get()).data().byName, '');
+  assert.equal((await admin.doc(`parties/${code}/requestMeta/${id}`).get()).data().name, 'Ana');
+  await dj('settings', { code, patch: { showNames: true } });
+  assert.equal((await admin.doc(`parties/${code}/requests/${id}`).get()).data().byName, 'Ana');
 });
 
 test('DJ can block a disruptive guest', async () => {
-  const { base, dj } = await newParty();
-  const troll = browser(), fan = browser();
-  const id = (await troll(`${base}/requests`, { method: 'POST', body: { title: 'Rude title' } })).data.id;
-  const fanId = (await fan(`${base}/requests`, { method: 'POST', body: { title: 'Nice song' } })).data.id;
-  await troll(`${base}/requests/${fanId}/vote`, { method: 'POST' });
-  assert.equal((await dj(`${base}/dj/requests/${id}/block`, { method: 'POST' })).status, 200);
-  const st = (await dj(`${base}/state`)).data;
-  assert.ok(!st.requests.some(r => r.id === id), 'their request is gone');
-  assert.equal(st.requests.find(r => r.id === fanId).votes, 1, 'their votes are removed');
-  assert.equal(st.blockedCount, 1);
-  assert.equal((await troll(`${base}/requests`, { method: 'POST', body: { title: 'again' } })).status, 403);
-  assert.equal((await troll(`${base}/requests/${fanId}/vote`, { method: 'POST' })).status, 403);
-  await dj(`${base}/dj/unblock-all`, { method: 'POST' });
-  assert.equal((await troll(`${base}/requests`, { method: 'POST', body: { title: 'sorry' } })).status, 201);
+  const { dj, code } = await newParty();
+  const troll = await browser(), fan = await browser();
+  const { id } = (await troll('request', { code, title: 'Rude title' })).data;
+  const fanId = (await fan('request', { code, title: 'Nice song' })).data.id;
+  await troll('vote', { code, id: fanId, on: true });
+  assert.deepEqual((await dj('action', { code, id, action: 'block' })).data, { ok: true });
+  const reqs = await requestsOf(code);
+  assert.equal(reqs.find(r => r.id === id).status, 'dismissed');
+  assert.deepEqual(reqs.find(r => r.id === fanId).votes, [fan.uid], 'their votes are removed');
+  assert.equal((await troll('request', { code, title: 'again' })).error, 'PERMISSION_DENIED');
+  assert.equal((await troll('vote', { code, id: fanId, on: true })).error, 'PERMISSION_DENIED');
+  await dj('unblockAll', { code });
+  assert.ok((await troll('request', { code, title: 'sorry' })).data);
+});
+
+test('second device signs in as DJ with the PIN; wrong PIN refused', async () => {
+  const { code, pin } = await newParty();
+  const phone = await browser();
+  assert.equal((await phone('djLogin', { code, pin: '000000' })).error, 'PERMISSION_DENIED');
+  assert.deepEqual((await phone('djLogin', { code, pin })).data, { ok: true });
+  assert.equal(await phone.read(`parties/${code}/private/dj`), 200);
+  assert.deepEqual((await phone('settings', { code, patch: { requestsOpen: false } })).data, { ok: true });
+  assert.equal((await (await browser())('request', { code, title: 'x' })).error, 'FAILED_PRECONDITION', 'requests paused');
+  await phone('djLogout', { code });
+  assert.equal(await phone.read(`parties/${code}/private/dj`), 403);
+});
+
+// ------------------------------------------------------------------ Spotify
+
+test('a guest cannot fake song details or dodge the explicit filter', async () => {
+  const party = await newParty();
+  await connectSpotify(party);
+  const { dj, code } = party;
+  const guest = await browser();
+  const { results } = (await guest('search', { code, q: 'dreams' })).data;
+  const dreams = results.find(t => t.title === 'Dreams');
+  assert.ok(dreams.sig, 'results are signed');
+
+  // Forged / altered tracks are refused.
+  const { sig, ...track } = dreams;
+  assert.equal((await guest('request', { code, track: { ...track, title: 'Happy Birthday' }, sig })).error, 'INVALID_ARGUMENT');
+  assert.equal((await guest('request', { code, track: { ...track, uri: 'spotify:track:SOMETHING_ELSE' }, sig })).error, 'INVALID_ARGUMENT');
+  assert.equal((await guest('request', { code, track, sig: 'forged' })).error, 'INVALID_ARGUMENT');
+
+  // The genuine one works, and queueing sends the real URI to Spotify.
+  const { id } = (await guest('request', { code, track, sig })).data;
+  assert.deepEqual((await dj('action', { code, id, action: 'queue' })).data, { ok: true });
+  assert.equal(fake.state.queued.at(-1), dreams.uri);
+
+  // Explicit filter: hidden from search, and a previously signed explicit song is refused.
+  const rude = (await guest('search', { code, q: 'rude' })).data.results.find(t => t.explicit);
+  await dj('settings', { code, patch: { allowExplicit: false } });
+  const filtered = (await guest('search', { code, q: 'rude 2' })).data.results;
+  assert.ok(!filtered.some(t => t.explicit), 'explicit hidden from search');
+  const { sig: rsig, ...rtrack } = rude;
+  assert.equal((await (await browser())('request', { code, track: rtrack, sig: rsig })).error, 'FAILED_PRECONDITION');
+});
+
+test('Spotify login only completes in the DJ browser that started it; state is single-use', async () => {
+  const { dj, code, pin } = await newParty();
+  const start = await dj('spotifyStart', { code, clientId: 'c'.repeat(32) });
+  const u = new URL(start.data.url);
+  assert.equal(u.searchParams.get('code_challenge_method'), 'S256');
+  assert.ok(!u.searchParams.has('client_secret'));
+  assert.equal(u.searchParams.get('redirect_uri'), 'https://demo-queueup-test.web.app/auth/spotify/callback');
+  const state = u.searchParams.get('state');
+
+  const otherDj = await browser();
+  await otherDj('djLogin', { code, pin });
+  assert.equal((await otherDj('spotifyComplete', { code, state, authCode: 'x' })).error, 'PERMISSION_DENIED', 'different browser refused');
+  assert.equal((await dj('spotifyComplete', { code, state, authCode: 'x' })).error, 'DEADLINE_EXCEEDED', 'state already used');
+  assert.equal((await admin.doc(`parties/${code}`).get()).data().spotifyConnected, false);
+});
+
+test('Spotify stays connected through expired tokens and parallel calls', async () => {
+  const party = await newParty();
+  await connectSpotify(party);
+  fake.expireAllTokens();
+  fake.state.refreshCalls = 0;
+  const guests = await Promise.all([1, 2, 3, 4, 5].map(() => browser()));
+  const res = await Promise.all(guests.map((g, i) => g('search', { code: party.code, q: `fresh query ${i}` })));
+  assert.ok(res.every(r => r.data), JSON.stringify(res.find(r => r.error)));
+  assert.equal(fake.state.refreshCalls, 1, 'one shared refresh');
+  assert.equal((await admin.doc(`parties/${party.code}`).get()).data().spotifyConnected, true);
 });
 
 test('searches are cached and Spotify rate limits are respected', async () => {
   const party = await newParty();
   await connectSpotify(party);
   const before = fake.state.searchCalls;
-  for (let i = 0; i < 5; i++) assert.equal((await browser()(`${party.base}/search?q=Same%20Song`)).status, 200);
+  for (let i = 0; i < 4; i++) assert.ok((await (await browser())('search', { code: party.code, q: 'Same Song' })).data);
   assert.equal(fake.state.searchCalls - before, 1, 'one Spotify call for repeated searches');
-
   fake.state.rateLimitSearch = 3;
   try {
-    const first = await browser()(`${party.base}/search?q=new%20one`);
-    assert.equal(first.status, 429);
+    assert.equal((await party.dj('search', { code: party.code, q: 'new one' })).error, 'RESOURCE_EXHAUSTED');
     const calls = fake.state.searchCalls;
-    const second = await browser()(`${party.base}/search?q=another`);
-    assert.equal(second.status, 429);
+    assert.equal((await party.dj('search', { code: party.code, q: 'another' })).error, 'RESOURCE_EXHAUSTED');
     assert.equal(fake.state.searchCalls, calls, 'backs off without calling Spotify again');
-    assert.equal((await party.dj(`${party.base}/state`)).data.spotify.connected, true, 'not disconnected');
+    assert.equal((await admin.doc(`parties/${party.code}`).get()).data().spotifyConnected, true, 'not disconnected');
   } finally { fake.state.rateLimitSearch = 0; }
 });
 
-test('guests can withdraw only their own requests', async () => {
-  const { base } = await newParty();
-  const a = browser(), b = browser();
-  const id = (await a(`${base}/requests`, { method: 'POST', body: { title: 'Mine' } })).data.id;
-  assert.equal((await b(`${base}/requests/${id}`, { method: 'DELETE' })).status, 404);
-  assert.equal((await a(`${base}/requests/${id}`, { method: 'DELETE' })).status, 200);
+test('now playing syncs from Spotify and marks the request as played', async () => {
+  const party = await newParty();
+  await connectSpotify(party);
+  const g = await browser();
+  const t = (await g('search', { code: party.code, q: 'np test' })).data.results[0];
+  const { sig, ...track } = t;
+  const { id } = (await g('request', { code: party.code, track, sig })).data;
+  fake.state.nowPlaying = fake.tracks.find(x => x.id === t.id);
+  await new Promise(r => setTimeout(r, 4100)); // server throttles polls per party
+  await party.dj('poll', { code: party.code });
+  const p = (await admin.doc(`parties/${party.code}`).get()).data();
+  assert.equal(p.nowPlaying?.track.id, t.id);
+  assert.equal((await admin.doc(`parties/${party.code}/requests/${id}`).get()).data().status, 'played');
+  fake.state.nowPlaying = null;
+});
+
+// ------------------------------------------------------------------ lifecycle
+
+test('ending a party deletes all its data; other parties live on', async () => {
+  const a = await newParty(), b = await newParty();
+  await (await browser())('request', { code: a.code, title: 'x' });
+  assert.deepEqual((await a.dj('end', { code: a.code })).data, { ok: true });
+  assert.equal((await admin.doc(`parties/${a.code}`).get()).exists, false);
+  assert.equal((await requestsOf(a.code)).length, 0);
+  assert.equal((await admin.doc(`parties/${a.code}/private/secrets`).get()).exists, false);
+  assert.equal((await admin.doc(`parties/${b.code}`).get()).exists, true);
+});
+
+test('guest count counts people once', async () => {
+  const { code } = await newParty();
+  const g = await browser();
+  await g('join', { code }); await g('join', { code });
+  await (await browser())('join', { code });
+  assert.equal((await admin.doc(`parties/${code}`).get()).data().guestCount, 2);
+});
+
+// Runs last: it trips the PIN limiter for this test machine's IP.
+test('PIN guessing is rate-limited', async () => {
+  const { code } = await newParty();
+  const attacker = await browser();
+  // Earlier tests may already have used a guess from this IP, so allow the limit to trip early.
+  const results = [];
+  for (let i = 0; i < 9; i++) results.push((await attacker('djLogin', { code, pin: '000000' })).error);
+  assert.ok(results.every(e => e === 'PERMISSION_DENIED' || e === 'RESOURCE_EXHAUSTED'), results.join());
+  assert.ok(results.filter(e => e === 'PERMISSION_DENIED').length <= 8, 'at most 8 guesses a minute');
+  assert.equal(results.at(-1), 'RESOURCE_EXHAUSTED');
+  const fresh = await browser(); // new identity, same IP: still limited
+  assert.equal((await fresh('djLogin', { code, pin: '000000' })).error, 'RESOURCE_EXHAUSTED');
 });

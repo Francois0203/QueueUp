@@ -1,0 +1,22 @@
+.field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }
+.label { font-size: 13px; color: var(--muted); }
+.wrap { position: relative; flex: 1; min-width: 0; }
+.input {
+  width: 100%; height: 52px; padding: 0 16px; border-radius: 16px; outline: none;
+  border: 1px solid var(--line); background: var(--surface);
+  transition: border-color .2s ease, background-color .2s ease, box-shadow .3s ease;
+}
+.input::placeholder { color: var(--faint); }
+.input:focus { border-color: var(--line-strong); background: var(--surface-2); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .08); }
+.hasIcon .input { padding-left: 46px; }
+.hasTrailing .input { padding-right: 96px; }
+.icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--faint); display: inline-flex; pointer-events: none; }
+.trailing { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; }
+.valid { border-color: rgba(var(--accent-rgb), .6); }
+
+.code { text-align: center; letter-spacing: .42em; padding-left: calc(16px + .42em); font-weight: 650; font-size: 19px; text-transform: uppercase; }
+.code::placeholder { letter-spacing: .42em; }
+.pin { text-align: center; letter-spacing: .5em; padding-left: calc(16px + .5em); font-size: 22px; font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 14px; }
+.subtle { height: 38px; border-radius: 11px; background: transparent; border-style: dashed; font-size: 14px; }
+.subtle:focus { border-style: solid; box-shadow: none; }

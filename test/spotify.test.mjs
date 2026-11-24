@@ -8,7 +8,7 @@ before(async () => {
   fake = await startFakeSpotify();
   process.env.SPOTIFY_ACCOUNTS_URL = fake.accountsUrl;
   process.env.SPOTIFY_API_URL = fake.apiUrl;
-  sp = await import('../spotify.js'); // reads the env at import time
+  sp = await import('../functions/src/spotify.js'); // reads the env at import time
 });
 after(() => fake.close());
 

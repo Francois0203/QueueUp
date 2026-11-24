@@ -1,7 +1,7 @@
 // Minimal fake of Spotify's accounts + Web API, enough to test QueueUp end to end.
 import http from 'node:http';
 
-export async function startFakeSpotify() {
+export async function startFakeSpotify({ port = 0 } = {}) {
   const state = {
     validTokens: new Set(),
     usedRefresh: new Set(),
@@ -75,7 +75,7 @@ export async function startFakeSpotify() {
     send(res, 404, { error: { status: 404, message: 'Not found' } });
   });
 
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  await new Promise(r => server.listen(port, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   return {
     state, tracks,

@@ -1,0 +1,9 @@
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.row { display: flex; align-items: center; gap: 14px; padding: 10px; }
+.lines { flex: 1; }
+.block {
+  height: 11px; border-radius: 6px; margin: 7px 0;
+  background: linear-gradient(90deg, var(--surface) 0%, var(--surface-3) 50%, var(--surface) 100%);
+  background-size: 200% 100%; animation: shimmer 1.3s linear infinite;
+}
+.art { width: 48px; height: 48px; margin: 0; border-radius: var(--art-radius); flex: none; }
