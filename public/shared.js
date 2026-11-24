@@ -49,14 +49,22 @@ export function toast(msg, { error = false, ms = 2600 } = {}) {
 }
 
 /** Server-sent events with automatic reconnect. */
-export function connect(onState, onStatus = () => {}) {
-  let es, retry = 0;
+export function connect(base, onState, onStatus = () => {}, onEnded = () => {}) {
+  let es, retry = 0, ended = false;
   const open = () => {
-    es = new EventSource('/api/events');
+    if (ended) return;
+    es = new EventSource(`${base}/events`);
     es.addEventListener('state', e => { retry = 0; onStatus(true); onState(JSON.parse(e.data)); });
-    es.onerror = () => {
-      onStatus(false);
+    es.addEventListener('ended', () => { ended = true; es.close(); onEnded(); });
+    es.onerror = async () => {
       es.close();
+      if (ended) return;
+      onStatus(false);
+      // Distinguish "server unreachable" from "party no longer exists".
+      try {
+        const r = await fetch(`${base}/state`, { credentials: 'same-origin' });
+        if (r.status === 404) { ended = true; return onEnded(); }
+      } catch {}
       setTimeout(open, Math.min(1000 * 2 ** retry++, 15000));
     };
   };
@@ -108,6 +116,12 @@ export function renderList(ul, items, key, build, update) {
     if (Math.abs(dy) < 1) continue;
     el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 520, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
   }
+}
+
+/** Room code from /p/CODE or /dj/CODE. */
+export function roomCode() {
+  const m = location.pathname.match(/\/(?:p|dj)\/([A-Za-z0-9]{5})/);
+  return m ? m[1].toUpperCase() : '';
 }
 
 export function artEl(track, cls = 'art') {

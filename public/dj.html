@@ -6,22 +6,22 @@
   <meta name="theme-color" content="#0a0a0b">
   <meta name="robots" content="noindex">
   <title>DJ Console · QueueUp</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="dj">
   <!-- Login -->
   <div class="login" id="login" hidden>
     <form class="login-card" id="loginForm">
       <div class="brand-mark" style="width:48px;height:48px;border-radius:14px;margin:0 auto" id="loginLogo"></div>
-      <h1>DJ Console</h1>
-      <p>Enter your PIN to take control.</p>
+      <h1 id="loginTitle">DJ Console</h1>
+      <p>Enter the DJ PIN to take control.</p>
       <input class="input pin" id="pin" inputmode="numeric" autocomplete="current-password" maxlength="12" placeholder="••••••" aria-label="PIN">
       <button class="btn btn-primary" style="width:100%;margin-top:12px" type="submit">Unlock</button>
-      <p class="note" style="margin-top:18px">The PIN is printed in the server console when QueueUp starts.</p>
+      <p class="note" style="margin-top:18px">The PIN was shown when the party was created. On a signed-in device, find it under Settings.</p>
     </form>
   </div>
 
@@ -125,6 +125,10 @@
           <div class="setting-text"><b>Spotify</b><span id="spotifyText">Not connected</span></div>
           <div id="spotifyAction"></div>
         </div>
+        <div class="setting">
+          <div class="setting-text"><b>DJ PIN</b><span>Use it to run this party from another device</span></div>
+          <button class="btn btn-sm" id="showPin">Show</button>
+        </div>
       </div>
 
       <div class="card">
@@ -134,11 +138,15 @@
         </div>
         <div class="setting">
           <div class="setting-text"><b>Reset requests</b><span>Remove every request, including the queue</span></div>
-          <button class="btn btn-sm btn-danger" id="clearAll">Reset</button>
+          <button class="btn btn-sm" id="clearAll">Reset</button>
         </div>
         <div class="setting">
           <div class="setting-text"><b>Sign out</b><span>Lock this device</span></div>
           <button class="btn btn-sm" id="logout">Sign out</button>
+        </div>
+        <div class="setting">
+          <div class="setting-text"><b>End party</b><span>Deletes the party for everyone. Guests' links stop working.</span></div>
+          <button class="btn btn-sm btn-danger" id="endParty">End</button>
         </div>
       </div>
     </section>
@@ -151,19 +159,60 @@
         <div class="qr-sub">Scan to see what's playing &amp; request a song</div>
       </div>
       <div class="url-row">
-        <input class="input" id="guestUrl" aria-label="Guest link">
-        <button class="btn btn-sm" id="saveUrl" hidden>Save</button>
+        <input class="input" id="guestUrl" aria-label="Guest link" readonly>
         <button class="btn btn-sm" id="copyUrl">Copy</button>
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
         <button class="btn btn-sm btn-ghost" id="printQr">Print</button>
         <a class="btn btn-sm btn-ghost" id="openGuest" target="_blank" rel="noopener" style="text-decoration:none">Open guest view</a>
       </div>
-      <p class="note" style="text-align:center">Guests' phones must be able to reach this link — same Wi-Fi for a local address, or set a public URL (e.g. a tunnel or deployed host). Edit the link above to change the QR code.</p>
+      <p class="note" style="text-align:center">Guests can also open the home page and enter code <b id="codeText"></b>.</p>
     </section>
   </main>
 
   <div class="print-area" id="printArea"></div>
-  <script type="module" src="dj.js"></script>
+
+  <div class="scrim" id="scrim"></div>
+
+  <!-- Welcome (after creating a party) -->
+  <section class="sheet sheet-auto" id="welcome" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle" aria-hidden="true">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h2 id="welcomeTitle">Your party is live</h2><button class="btn btn-icon" data-close aria-label="Close"></button></div>
+    <div class="sheet-body">
+      <p class="note" style="margin-top:0">Your DJ PIN. Save it — you need it to control this party from another device.</p>
+      <div class="pin-big" id="welcomePin"></div>
+      <p class="note" style="text-align:center;margin:0 0 22px">Party code <b id="welcomeCode"></b></p>
+      <ol class="steps">
+        <li><span><b>Connect Spotify</b> (optional) to show what's playing, let guests search, and queue with one tap.</span></li>
+        <li><span><b>Share the QR code</b> on a screen or print it.</span></li>
+      </ol>
+      <div style="display:flex;gap:8px">
+        <button class="btn" style="flex:1" id="welcomeShare">Show QR</button>
+        <button class="btn btn-primary" style="flex:1" id="welcomeSpotify">Connect Spotify</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Spotify setup -->
+  <section class="sheet" id="spotifySheet" role="dialog" aria-modal="true" aria-labelledby="spTitle" aria-hidden="true">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h2 id="spTitle">Connect Spotify</h2><button class="btn btn-icon" data-close aria-label="Close"></button></div>
+    <div class="sheet-body">
+      <p class="warn">Needs <b>Spotify Premium</b>. You connect through your own free Spotify developer app — a one-time, 3-minute setup. QueueUp never sees your Spotify password.</p>
+      <ol class="steps">
+        <li><span>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify Developer Dashboard</a>, log in, and click <b>Create app</b>.</span></li>
+        <li><span>Give it any name and description. Under <b>Redirect URIs</b>, add exactly:
+          <span class="copy-box"><code id="redirectUri"></code><button class="btn btn-sm" type="button" id="copyRedirect">Copy</button></span></span></li>
+        <li><span>Tick <b>Web API</b>, accept the terms and <b>Save</b>.</span></li>
+        <li><span>Open the app's <b>Settings</b>, copy the <b>Client ID</b> and paste it below. You don't need the client secret.</span></li>
+      </ol>
+      <form id="spotifyForm" autocomplete="off">
+        <div class="field"><label for="clientId">Client ID</label><input class="input" id="clientId" maxlength="64" spellcheck="false" placeholder="32 letters and numbers"></div>
+        <button class="btn btn-primary" style="width:100%" type="submit">Connect with Spotify</button>
+      </form>
+      <p class="note" id="loopbackNote" hidden>Finish this step on the computer running QueueUp: Spotify only returns you to <code>127.0.0.1</code> when testing locally.</p>
+    </div>
+  </section>
+  <script type="module" src="/dj.js"></script>
 </body>
 </html>

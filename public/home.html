@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="description" content="Live song requests for parties. Guests scan, request and vote. The DJ decides.">
+  <title>QueueUp — let the room pick the next song</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="home">
+  <div class="glow" aria-hidden="true"></div>
+  <main class="home-wrap">
+    <div class="home-head">
+      <div class="brand-mark home-mark" id="logo"></div>
+      <h1>Let the room pick<br>the next song.</h1>
+      <p>Guests scan a code, request songs and vote. You decide what plays.</p>
+    </div>
+
+    <form class="home-card" id="joinForm" autocomplete="off">
+      <label class="home-label" for="code">Join a party</label>
+      <div class="home-row">
+        <input class="input code-input" id="code" maxlength="5" placeholder="CODE" autocapitalize="characters" spellcheck="false" aria-label="Party code">
+        <button class="btn" type="submit">Join</button>
+      </div>
+    </form>
+
+    <div class="or"><span>or</span></div>
+
+    <form class="home-card" id="startForm" autocomplete="off">
+      <label class="home-label" for="partyName">Host a party</label>
+      <div class="home-row">
+        <input class="input" id="partyName" maxlength="40" placeholder="Party name" aria-label="Party name">
+        <button class="btn btn-primary" type="submit">Start</button>
+      </div>
+      <p class="note">Free. Works with your own Spotify Premium, or without Spotify.</p>
+    </form>
+
+    <div id="mine" hidden>
+      <div class="section-head"><span>Your parties</span></div>
+      <ul class="list" id="mineList"></ul>
+    </div>
+  </main>
+  <script type="module" src="/home.js"></script>
+</body>
+</html>

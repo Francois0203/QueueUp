@@ -1,9 +1,10 @@
-import { icons, h, api, toast, connect, renderList, artEl, setArt, fmtTime, subline, progressOf } from './shared.js';
+import { icons, h, api, toast, connect, renderList, artEl, setArt, fmtTime, subline, progressOf, roomCode } from './shared.js';
 
 const $ = id => document.getElementById(id);
+const BASE = `/api/r/${roomCode()}`;
 let S = null;            // latest server state
 let clockOffset = 0;
-let heroTrackId = null;
+let heroTrackId;          // undefined until first render, so the empty state draws too
 const pendingVotes = new Map(); // request id -> optimistic voted state
 
 $('logo').innerHTML = icons.logo;
@@ -14,13 +15,20 @@ $('fabIcon').style.display = 'inline-flex';
 
 // ------------------------------------------------------------- realtime
 
-connect(state => {
+connect(BASE, state => {
   S = state;
   clockOffset = state.serverTime - Date.now();
   render();
 }, online => {
   $('live').classList.toggle('offline', !online);
   if (!online) $('liveText').textContent = 'Reconnecting';
+}, () => {
+  closeSheet();
+  document.querySelector('main').hidden = true;
+  document.querySelector('.fab-wrap').hidden = true;
+  $('ambient').classList.remove('on');
+  $('endedLogo').innerHTML = icons.logo;
+  $('ended').hidden = false;
 });
 
 function render() {
@@ -144,7 +152,7 @@ async function vote(id, btn) {
   if (navigator.vibrate) navigator.vibrate(8);
   render();
   try {
-    await api(`/api/requests/${id}/vote`, { method: 'POST' });
+    await api(`${BASE}/requests/${id}/vote`, { method: 'POST' });
   } catch (e) {
     pendingVotes.delete(id);
     render();
@@ -216,7 +224,7 @@ async function runSearch() {
   $('resultsEmpty').hidden = true;
   if (!list.children.length) list.replaceChildren(h('div', { class: 'spinner' }));
   try {
-    const { results } = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const { results } = await api(`${BASE}/search?q=${encodeURIComponent(q)}`);
     if (seq !== searchSeq) return;
     if (!results.length) {
       list.replaceChildren(h('div', { class: 'empty' }, h('strong', {}, 'No matches'), 'Try a different spelling.'));
@@ -230,7 +238,7 @@ async function runSearch() {
         artEl(t),
         h('div', { class: 'meta' }, h('div', { class: 'title' }, t.title), h('div', { class: 'sub' }, ...subline(t, extra))),
         h('span', { class: 'add', html: icons.plus }));
-      li.onclick = () => submit({ track: t }, li);
+      li.onclick = () => submit({ trackId: t.id }, li);
       return li;
     }));
   } catch (e) {
@@ -247,7 +255,7 @@ $('manualForm').addEventListener('submit', async e => {
 async function submit(payload, row, button) {
   button?.classList.add('loading');
   try {
-    const res = await api('/api/requests', { method: 'POST', body: { ...payload, name: nameInput.value } });
+    const res = await api(`${BASE}/requests`, { method: 'POST', body: { ...payload, name: nameInput.value } });
     if (row) { row.classList.add('done'); row.querySelector('.add').innerHTML = icons.check; }
     if (navigator.vibrate) navigator.vibrate([10, 40, 10]);
     toast(res.merged ? (res.status === 'queued' ? 'Already queued — good taste' : 'Already requested — added your vote') : 'Request sent');

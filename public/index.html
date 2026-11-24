@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a0a0b">
   <title>QueueUp</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="ambient" id="ambient"><img alt=""></div>
@@ -86,6 +86,15 @@
     </div>
   </section>
 
-  <script type="module" src="guest.js"></script>
+  <div class="login" id="ended" hidden>
+    <div class="login-card">
+      <div class="brand-mark" style="width:48px;height:48px;border-radius:14px;margin:0 auto" id="endedLogo"></div>
+      <h1>This party has ended</h1>
+      <p>The code may be wrong, or the DJ has wrapped up for the night.</p>
+      <a class="btn" href="/" style="text-decoration:none">Join another party</a>
+    </div>
+  </div>
+
+  <script type="module" src="/guest.js"></script>
 </body>
 </html>
