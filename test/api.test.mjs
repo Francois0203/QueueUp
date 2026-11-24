@@ -175,6 +175,33 @@ test('second device signs in as DJ with the PIN; wrong PIN refused', async () =>
   assert.equal(await phone.read(`parties/${code}/private/dj`), 403);
 });
 
+test('a one-time DJ link signs in one device, once; only DJs can make one', async () => {
+  const { dj, code } = await newParty();
+  const guest = await browser();
+  assert.equal((await guest('djInvite', { code })).error, 'PERMISSION_DENIED', 'guests cannot make DJ links');
+
+  const { token } = (await dj('djInvite', { code })).data;
+  const secrets = JSON.stringify((await admin.doc(`parties/${code}/private/secrets`).get()).data());
+  assert.ok(!secrets.includes(token), 'only a hash of the link is stored');
+
+  const phone = await browser();
+  assert.deepEqual((await phone('djLogin', { code, invite: token })).data, { ok: true });
+  assert.equal(await phone.read(`parties/${code}/private/dj`), 200, 'the phone is now a DJ');
+  assert.equal((await (await browser())('djLogin', { code, invite: token })).error, 'PERMISSION_DENIED', 'used up');
+
+  // Expired links are refused.
+  const late = (await dj('djInvite', { code })).data.token;
+  const ref = admin.doc(`parties/${code}/private/secrets`);
+  const invites = (await ref.get()).data().invites;
+  await ref.update(Object.fromEntries(Object.keys(invites).map(k => [`invites.${k}`, { exp: Date.now() - 1 }])));
+  assert.equal((await (await browser())('djLogin', { code, invite: late })).error, 'PERMISSION_DENIED', 'expired');
+
+  // A link for one party doesn't work on another.
+  const other = await newParty();
+  const t2 = (await dj('djInvite', { code })).data.token;
+  assert.equal((await (await browser())('djLogin', { code: other.code, invite: t2 })).error, 'PERMISSION_DENIED');
+});
+
 // ------------------------------------------------------------------ Spotify
 
 test('a guest cannot fake song details or dodge the explicit filter', async () => {

@@ -8,6 +8,10 @@ import { fail, clean, randomCode, isPartyCode, limited, signTrack, verifyTrack, 
 const TERMS_VERSION = '2026-11-24'; // bump when the Terms change materially
 const IDLE_MS = 48 * 3600_000;      // parties idle this long are deleted
 const CLOSED_TTL_MS = 3 * 3600_000; // played/dismissed requests kept this long
+const INVITE_TTL_MS = 10 * 60_000;  // one-time DJ links work this long
+
+// DJ links are stored hashed, so a leaked database copy can't be used to sign in.
+const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
 
 const DEFAULT_SETTINGS = {
   requestsOpen: true,
@@ -365,7 +369,22 @@ export const ops = {
 
   // ---------------- DJ
 
-  async djLogin({ code, pin }, { uid, ip }) {
+  /** A DJ makes a one-time link (shown as a QR code) to sign in another device without the PIN. */
+  async djInvite({ code }, { uid }) {
+    const { r } = await requireDj(code, uid);
+    if (limited(`invite:${uid}`, 10, 3600_000)) fail('resource-exhausted', 'Too many DJ links. Wait a while.');
+    const token = randomKey();
+    const now = Date.now();
+    const sec = (await r.secrets.get()).data() || {};
+    const expired = Object.entries(sec.invites || {}).filter(([, v]) => v.exp < now).map(([k]) => `invites.${k}`);
+    await r.secrets.update({
+      [`invites.${sha256(token)}`]: { exp: now + INVITE_TTL_MS },
+      ...Object.fromEntries(expired.map(k => [k, FieldValue.delete()])),
+    });
+    return { token, expiresInMs: INVITE_TTL_MS };
+  },
+
+  async djLogin({ code, pin, invite }, { uid, ip }) {
     // Wrong guesses are counted per IP, per browser identity (8/min, 40/h) and per party (100/h).
     // The party cap is high so a guest can't lock the DJ out, but a 6-digit PIN still takes
     // thousands of hours to guess. Signed-in DJ devices are never affected.
@@ -375,10 +394,23 @@ export const ops = {
     }
     if (limited(`pin:party:${code}`, 100, 3600_000, false)) fail('resource-exhausted', 'Too many attempts. Wait a few minutes.');
     const { r, dj } = await loadDj(code, uid);
-    if (!timingSafeEqualStr(String(pin ?? '').trim(), dj.pin)) {
+    const wrong = message => {
       for (const k of keys) { limited(k, 8, 60_000); limited(`${k}:h`, 40, 3600_000); }
       limited(`pin:party:${code}`, 100, 3600_000);
-      fail('permission-denied', 'Wrong PIN.');
+      fail('permission-denied', message);
+    };
+    if (invite) {
+      // One-time DJ link: valid for a few minutes and used up on the first sign-in.
+      const key = sha256(String(invite));
+      const ok = await db().runTransaction(async tx => {
+        const found = (await tx.get(r.secrets)).data()?.invites?.[key];
+        if (!found) return false;
+        tx.update(r.secrets, { [`invites.${key}`]: FieldValue.delete() });
+        return found.exp > Date.now();
+      });
+      if (!ok) wrong('This DJ link has expired or was already used. Ask for a new one.');
+    } else if (!timingSafeEqualStr(String(pin ?? '').trim(), dj.pin)) {
+      wrong('Wrong PIN.');
     }
     const djUids = [...(dj.djUids || []).filter(u => u !== uid), uid].slice(-20);
     await r.dj.update({ djUids });

@@ -38,7 +38,7 @@ export function DjLogin({ code, partyName, onSignedIn }: { code: string; partyNa
           <TextField variant="pin" inputMode="numeric" autoComplete="current-password" maxLength={12} placeholder="••••••"
             aria-label="PIN" autoFocus value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} />
           <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={pin.length < 4}>Unlock</Button>
-          <p className={styles.hint}>The PIN was shown when the party was created. On a signed-in device, find it under Settings.</p>
+          <p className={styles.hint}>No PIN? On the device you're DJing from, open <b>Share</b> and tap <b>Show DJ code</b>, then scan it with this one. The PIN is also under Settings there.</p>
         </motion.form>
       </main>
     </>

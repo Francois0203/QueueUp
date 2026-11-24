@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { Button, CopyField } from '../../components';
 import type { RoomState } from '../../types';
 import { spring } from '../../lib';
+import { DjLinkCard } from './DjLinkCard';
 import styles from './Dj.module.css';
 
 /** QR code drawn in the browser (no server needed). */
@@ -29,7 +30,7 @@ function QrCard({ src, name }: { src: string; name: string }) {
   );
 }
 
-export function SharePanel({ state }: { code: string; state: RoomState }) {
+export function SharePanel({ code, state }: { code: string; state: RoomState }) {
   const [printing, setPrinting] = useState(false);
   const src = useQr(state.guestUrl ?? '');
   const print = () => {
@@ -51,6 +52,7 @@ export function SharePanel({ state }: { code: string; state: RoomState }) {
         </div>
         <p className={styles.note}>Guests can also open the home page and enter code <b>{state.code}</b>. Only share it with people you invited.</p>
       </div>
+      <DjLinkCard code={code} />
       {printing && createPortal(<div className="print-area"><QrCard src={src} name={state.settings.partyName} /></div>, document.getElementById('root')!)}
     </>
   );
