@@ -8,11 +8,13 @@ const cfg = __FIREBASE__;
 export const app = initializeApp(cfg.config);
 
 // App Check (reCAPTCHA Enterprise) blocks scripted abuse once a site key is configured.
-if (cfg.appCheckKey && !cfg.emulators) {
-  import('firebase/app-check').then(({ initializeAppCheck, ReCaptchaEnterpriseProvider }) => {
-    initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(cfg.appCheckKey), isTokenAutoRefreshEnabled: true });
-  });
-}
+// ensureUser() waits for it, so no request goes out before a token can be attached.
+const appCheckReady: Promise<unknown> = cfg.appCheckKey && !cfg.emulators
+  ? import('firebase/app-check')
+      .then(({ initializeAppCheck, ReCaptchaEnterpriseProvider }) =>
+        initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(cfg.appCheckKey), isTokenAutoRefreshEnabled: true }))
+      .catch(e => console.warn('App Check unavailable', e))
+  : Promise.resolve();
 
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
@@ -34,11 +36,11 @@ export const SPOTIFY_REDIRECT_URI = `${PUBLIC_URL}/auth/spotify/callback`;
  */
 let userPromise: Promise<string> | null = null;
 export function ensureUser(): Promise<string> {
-  userPromise ??= new Promise<string>((resolve, reject) => {
+  userPromise ??= appCheckReady.then(() => new Promise<string>((resolve, reject) => {
     const stop = onAuthStateChanged(auth, user => {
       if (user) { stop(); resolve(user.uid); return; }
       signInAnonymously(auth).catch(e => { stop(); userPromise = null; reject(e); });
     });
-  });
+  }));
   return userPromise;
 }
