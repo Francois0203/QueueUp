@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Aura, Button, EmptyState, Footer, LiveIndicator, Logo, NowPlayingHero, Page, SectionHeader, SongRow, TopBar, VoteButton, useToast,
 } from '../../components';
-import { useDocumentTitle, useRoom } from '../../hooks';
+import { useDocumentTitle, useNowPlayingSync, useRoom } from '../../hooks';
 import { call, spring } from '../../lib';
 import { EndedPage } from '../Ended';
 import { RequestSheet } from './RequestSheet';
@@ -39,22 +39,8 @@ export function GuestPage({ code }: { code: string }) {
   // Count this guest once (no live connection to count anymore).
   useEffect(() => { call('join', { code }).catch(() => {}); }, [code]);
 
-  // The DJ console keeps "now playing" fresh. As a fallback (DJ console closed), nudge a refresh
-  // only when the current song should already have ended, so this costs almost nothing.
-  const lastNudge = useRef(0);
-  useEffect(() => {
-    if (!state?.spotify.connected) return;
-    const t = setInterval(() => {
-      const np = state.nowPlaying;
-      const overdue = np ? np.isPlaying && np.track.durationMs > 0 && Date.now() - np.updatedAt + np.progressMs > np.track.durationMs + 8000 : true;
-      const wait = np ? 15_000 : 45_000;
-      if (overdue && Date.now() - lastNudge.current > wait && document.visibilityState === 'visible') {
-        lastNudge.current = Date.now();
-        call('poll', { code }).catch(() => {});
-      }
-    }, 5000);
-    return () => clearInterval(t);
-  }, [state?.spotify.connected, state?.nowPlaying, code]);
+  // Keep "now playing" live, even when the DJ console is closed.
+  useNowPlayingSync(code, { connected: Boolean(state?.spotify.connected), np: state?.nowPlaying ?? null, listeners: state?.listeners ?? 0 });
 
   if (status === 'ended') return <EndedPage />;
 

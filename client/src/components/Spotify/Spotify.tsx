@@ -6,7 +6,7 @@ import styles from './Spotify.module.css';
 
 /**
  * The official Spotify logo, if the operator placed it at /brand/spotify-logo.svg
- * (download from developer.spotify.com/design — never redraw trademarks).
+ * (download from developer.spotify.com/design; never redraw trademarks).
  * Falls back to the word "Spotify".
  */
 export function SpotifyLogo({ height = 16 }: { height?: number }) {
@@ -15,7 +15,7 @@ export function SpotifyLogo({ height = 16 }: { height?: number }) {
   return <img src="/brand/spotify-logo.svg" alt="Spotify" style={{ height, width: 'auto' }} onError={() => setFailed(true)} />;
 }
 
-/** "Open in Spotify" pill — required link-back for Spotify metadata. */
+/** "Open in Spotify" pill: the link-back Spotify requires next to its metadata. */
 export function OpenInSpotify({ track }: { track: Track }) {
   const href = spotifyUrl(track);
   if (!href) return null;

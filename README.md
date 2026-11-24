@@ -153,5 +153,5 @@ Terms of Service (`/terms`), Privacy Policy (`/privacy`), a proprietary `LICENSE
 
 - **Votes are per browser, not per person.** A determined guest can vote again from a private window. That's fine for a party, but not for anything with stakes.
 - **The guest count is "people who joined"**, not "people online right now". Live presence would cost a database write per guest every minute.
-- **The first action after a quiet period can take 1–3 seconds**, while the function cold-starts (instances scale to zero to stay free).
+- **The first action after a quiet period can take 1 to 3 seconds**, while the function cold-starts (instances scale to zero to stay free).
 - **Rate limits are kept in each function's memory.** With at most 3 instances they hold within a factor of 3, which is good enough with App Check in front.

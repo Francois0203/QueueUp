@@ -65,3 +65,4 @@
 @media (max-width: 560px) {
   .lbl { display: none; }
 }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

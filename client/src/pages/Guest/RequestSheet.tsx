@@ -58,7 +58,7 @@ export function RequestSheet({ open, onClose, code, state, onRequested }: Props)
     haptics.success();
     if (res.id) onRequested(res.id);
     setSuccess(res.merged
-      ? res.status === 'queued' ? { title: 'Already queued', text: 'Good taste — it’s coming up.' } : { title: 'Vote added', text: 'Someone beat you to it. Your vote counts.' }
+      ? res.status === 'queued' ? { title: 'Already queued', text: 'Good taste. It’s coming up.' } : { title: 'Vote added', text: 'Someone beat you to it. Your vote counts.' }
       : { title: 'Request sent', text: 'Get the room to vote for it.' });
     setTimeout(() => { onClose(); setQ(''); setResults(null); }, 1500);
   };

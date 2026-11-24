@@ -7,3 +7,4 @@
   background-size: 200% 100%; animation: shimmer 1.3s linear infinite;
 }
 .art { width: 48px; height: 48px; margin: 0; border-radius: var(--art-radius); flex: none; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

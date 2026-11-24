@@ -87,10 +87,10 @@ export function SpotifyWizard({ open, startStep, code, state, onClose }: Props) 
               )}
               <span className={styles.stepIcon}><Icon name="key" size={26} /></span>
               <h3>One quick setup</h3>
-              <p>Spotify asks every DJ to create a free personal "app key". It takes about 3 minutes, and you only do it once — this device remembers it.</p>
+              <p>Spotify asks every DJ to create a free personal "app key". It takes about 3 minutes, and you only do it once. This device remembers it.</p>
               <ul className={styles.checks}>
                 <li><Icon name="check" /><span>A <b>Spotify Premium</b> account (needed for queueing)</span></li>
-                <li><Icon name="check" /><span>Your Spotify login — QueueUp <b>never sees your password</b></span></li>
+                <li><Icon name="check" /><span>You log in on Spotify itself, so QueueUp <b>never sees your password</b></span></li>
                 <li><Icon name="check" /><span>Spotify open on the device that plays the music</span></li>
               </ul>
               <div className={styles.nav}><Button variant="primary" size="lg" block onClick={() => go(1)}>Let's go</Button></div>
@@ -105,14 +105,14 @@ export function SpotifyWizard({ open, startStep, code, state, onClose }: Props) 
               <div style={{ height: 16 }} />
               <CopyField label="App name" value="QueueUp party" />
               <CopyField label="App description" value="Song requests for my parties" />
-              <CopyField label="Redirect URI — must match exactly" value={redirectUri} important />
+              <CopyField label="Redirect URI (must match exactly)" value={redirectUri} important />
               <ul className={styles.checks}>
                 <li><Icon name="check" /><span>If you land on your dashboard instead of a form, click <b>Create app</b></span></li>
                 <li><Icon name="check" /><span>Under "Which API/SDKs", tick <b>Web API</b></span></li>
                 <li><Icon name="check" /><span>Tick the terms box and press <b>Save</b></span></li>
               </ul>
               <details className={styles.help}><summary>First time on Spotify's developer site?</summary>
-                <p>Spotify asks you to accept its developer terms and may ask you to verify your email before you can create an app. That's normal — do that, then come back here.</p></details>
+                <p>Spotify asks you to accept its developer terms and may ask you to verify your email before you can create an app. That's normal. Do that, then come back here.</p></details>
               <div className={styles.nav}><Button size="lg" onClick={() => go(0)}>Back</Button><Button variant="primary" size="lg" onClick={() => go(2)}>I've saved it</Button></div>
             </div>
           )}
@@ -120,7 +120,7 @@ export function SpotifyWizard({ open, startStep, code, state, onClose }: Props) 
           {step === 2 && (
             <form className={styles.step} onSubmit={submit} autoComplete="off">
               <h3>Paste your Client ID</h3>
-              <p>On your new app's page, copy the <b>Client ID</b>. Or just copy the page's web address — we'll find the ID in it.</p>
+              <p>On your new app's page, copy the <b>Client ID</b>. Or just copy the page's web address and we'll find the ID in it.</p>
               <TextField variant="mono" placeholder="Paste here" spellCheck={false} maxLength={300} aria-label="Spotify Client ID" autoFocus
                 value={input} valid={!!id} onChange={e => setInput(e.target.value)}
                 trailing={
@@ -137,8 +137,8 @@ export function SpotifyWizard({ open, startStep, code, state, onClose }: Props) 
               {local && <p className={styles.hint}>Local development: after logging in, Spotify sends you to the live site, which hands you straight back to <code>localhost:3000</code>.</p>}
               <div className={styles.nav}><Button size="lg" onClick={() => go(1)}>Back</Button><Button type="submit" variant="primary" size="lg" disabled={!id} loading={busy}>Connect Spotify</Button></div>
               <details className={styles.help}><summary>Spotify shows an error?</summary>
-                <p><b>"INVALID_CLIENT: Invalid redirect URI"</b> — the Redirect URI in your Spotify app doesn't match. Go back one step, copy it again, and paste it in your app under Settings → Edit → Redirect URIs. Then Save.</p>
-                <p><b>"INVALID_CLIENT: Invalid client"</b> — the Client ID is wrong. Copy it again from your app's Settings.</p>
+                <p><b>"INVALID_CLIENT: Invalid redirect URI"</b> means the Redirect URI in your Spotify app doesn't match. Go back one step, copy it again, and paste it in your app under Settings → Edit → Redirect URIs. Then Save.</p>
+                <p><b>"INVALID_CLIENT: Invalid client"</b> means the Client ID is wrong. Copy it again from your app's Settings.</p>
                 <p><b>Can't find your app?</b> Open <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">developer.spotify.com/dashboard</a> and click it.</p>
               </details>
             </form>

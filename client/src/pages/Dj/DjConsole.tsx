@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { Aura, Chip, Logo, Page, SegmentedTabs, TopBar, AnimatedNumber, useToast } from '../../components';
-import { useDocumentTitle, useRoom } from '../../hooks';
-import { call, go, haptics, panel, plural } from '../../lib';
+import { useDocumentTitle, useNowPlayingSync, useRoom } from '../../hooks';
+import { go, haptics, panel, plural } from '../../lib';
 import { RequestsPanel } from './RequestsPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SharePanel } from './SharePanel';
@@ -31,15 +31,8 @@ export function DjConsole({ code }: { code: string }) {
 
   useEffect(() => { if (status === 'ended') go('/'); }, [status]);
 
-  // The DJ console keeps "now playing" in sync with Spotify (server throttles and only writes changes).
-  const spotifyOn = Boolean(state?.spotify.connected);
-  useEffect(() => {
-    if (!spotifyOn) return;
-    const tick = () => { if (document.visibilityState === 'visible') call('poll', { code }).catch(() => {}); };
-    tick();
-    const t = setInterval(tick, 5000);
-    return () => clearInterval(t);
-  }, [spotifyOn, code]);
+  // Keep "now playing" in sync with Spotify (guests help too; see useNowPlayingSync).
+  useNowPlayingSync(code, { connected: Boolean(state?.spotify.connected), np: state?.nowPlaying ?? null, listeners: state?.listeners ?? 0, dj: true });
 
   // One-time messages from the URL (?welcome, ?spotify=…).
   useEffect(() => {

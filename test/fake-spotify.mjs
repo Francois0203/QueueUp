@@ -70,7 +70,9 @@ export async function startFakeSpotify({ port = 0 } = {}) {
     }
     if (req.method === 'POST' && url.pathname === '/v1/me/player/queue') {
       state.queued.push(url.searchParams.get('uri'));
-      return send(res, 204);
+      // Like the real API: a 200 whose body is not JSON.
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end('ok');
     }
     send(res, 404, { error: { status: 404, message: 'Not found' } });
   });

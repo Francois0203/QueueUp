@@ -64,3 +64,10 @@ test('a refresh finishing after a disconnect does not reconnect', async () => {
   await assert.rejects(pending);
   assert.equal(c.get(), null);
 });
+
+test('queueing succeeds when Spotify replies 200 with a non-JSON body', async () => {
+  const c = await expiredConn();
+  const client = sp.clientFor(c.get, c.set);
+  await client.addToQueue('spotify:track:abc');
+  assert.equal(fake.state.queued.at(-1), 'spotify:track:abc');
+});

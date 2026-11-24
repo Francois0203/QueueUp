@@ -117,7 +117,8 @@ export function clientFor(getConn, setConn) {
         retryAfter: Number(res.headers.get('retry-after')) || 0, // seconds, sent with 429
       });
     }
-    return text ? JSON.parse(text) : null;
+    // Some successful calls (like adding to the queue) reply with a body that isn't JSON.
+    try { return text ? JSON.parse(text) : null; } catch { return null; }
   }
 
   return {

@@ -8,7 +8,7 @@ interface Props { open: boolean; state: RoomState; onClose: () => void; onShare:
 export function WelcomeSheet({ open, state, onClose, onShare, onSpotify }: Props) {
   return (
     <Sheet open={open} onClose={onClose} title="Your party is live 🎉" fit>
-      <p className={styles.centerNote}>Your DJ PIN — you'll need it to control this party from another device.</p>
+      <p className={styles.centerNote}>Your DJ PIN. You'll need it to control this party from another device.</p>
       <PinDisplay pin={state.pin ?? ''} />
       <p className={styles.centerNote}>Party code <b>{state.code}</b></p>
       <ol className={styles.steps}>

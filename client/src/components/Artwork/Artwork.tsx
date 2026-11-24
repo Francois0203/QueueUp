@@ -12,7 +12,7 @@ interface Props {
 }
 
 /**
- * Album artwork, shown exactly as Spotify provides it (no blur, overlay, crop or motion —
+ * Album artwork, shown exactly as Spotify provides it (no blur, overlay, crop or motion;
  * only a fade-in while loading) and linked back to the track on Spotify.
  */
 export function Artwork({ track, size = 'sm', className = '' }: Props) {

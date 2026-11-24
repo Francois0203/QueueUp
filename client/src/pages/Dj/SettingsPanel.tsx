@@ -62,7 +62,7 @@ export function SettingsPanel({ code, state, onConnectSpotify }: { code: string;
 
       <Card>
         <SettingRow title="Spotify" description={sp.connected
-          ? `Connected${sp.user ? ` as ${sp.user.name}` : ''}${sp.user?.product && sp.user.product !== 'premium' ? ' — queueing needs Premium' : ''}`
+          ? `Connected${sp.user ? ` as ${sp.user.name}` : ''}${sp.user?.product && sp.user.product !== 'premium' ? '. Queueing needs Premium' : ''}`
           : 'Show what’s playing, let guests search, and queue with one tap'}>
           {sp.connected
             ? <Button size="sm" onClick={async () => { if (confirm('Disconnect Spotify? Guests will switch to typing song names.')) await post('spotifyDisconnect'); }}>Disconnect</Button>

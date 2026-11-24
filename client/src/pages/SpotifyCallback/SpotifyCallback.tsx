@@ -8,7 +8,7 @@ const LOCAL_ORIGIN = 'http://localhost:3000';
 
 /**
  * Spotify redirects every DJ here (one Redirect URI for all DJs and environments).
- * state = PARTY.nonce.origin — "l" means the login started on localhost, so hand it back there.
+ * state = PARTY.nonce.origin, where "l" means the login started on localhost, so hand it back there.
  */
 export function SpotifyCallbackPage() {
   useEffect(() => {

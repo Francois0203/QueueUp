@@ -341,13 +341,15 @@ export const ops = {
   },
 
   /**
-   * Refresh "now playing" from Spotify. Called by the DJ console every few seconds (and by guests
-   * as a fallback). Throttled per party, and only writes when something actually changed.
+   * Refresh "now playing" from Spotify. Every open DJ console and guest page nudges this, so it
+   * checks the cheap in-memory throttle before touching the database: at most one Spotify check
+   * per party every 3 seconds, and it only writes when something actually changed.
    */
-  async poll({ code }) {
+  async poll({ code }, { uid }) {
+    if (!isPartyCode(code)) fail('invalid-argument', 'That party code isn’t valid.');
+    if (limited(`pollu:${uid}`, 30, 60_000) || limited(`poll:${code}`, 1, 3000)) return { ok: true };
     const { r, party } = await loadParty(code);
     if (!party.spotifyConnected) return { ok: true };
-    if (limited(`poll:${code}`, 1, 4000)) return { ok: true };
     let np;
     try { np = await withSpotify(code, r, c => c.nowPlaying()); } catch (e) { if (e.httpErrorCode) throw e; return { ok: false }; }
     const cur = party.nowPlaying;

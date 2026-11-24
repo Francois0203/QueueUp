@@ -1,7 +1,8 @@
 import { motion } from 'motion/react';
+import { useEffect } from 'react';
 import { Aura, Footer, Logo } from '../../components';
 import { useDocumentTitle } from '../../hooks';
-import { spring } from '../../lib';
+import { ensureUser, spring } from '../../lib';
 import { JoinCard } from './JoinCard';
 import { HostCard } from './HostCard';
 import { YourParties } from './YourParties';
@@ -11,7 +12,9 @@ const LINE_1 = ['Let', 'the', 'room', 'pick'];
 const LINE_2 = ['the'];
 
 export function HomePage() {
-  useDocumentTitle('QueueUp — let the room pick the next song');
+  useDocumentTitle('QueueUp · Let the room pick the next song');
+  // Sign in (and pass App Check) in the background, so Start and Join respond quickly.
+  useEffect(() => { ensureUser().catch(() => {}); }, []);
   const word = (w: string, i: number, highlight = false) => (
     <motion.span key={`${w}-${i}`} className={highlight ? styles.highlight : styles.word}
       variants={{ hidden: { opacity: 0, y: 22, filter: 'blur(10px)' }, show: { opacity: 1, y: 0, filter: 'blur(0px)' } }}

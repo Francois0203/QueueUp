@@ -12,6 +12,7 @@
   border: 2px solid currentColor; border-right-color: transparent; opacity: .8;
   animation: spin .7s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 .btn:disabled { opacity: .45; cursor: default; }
 .loading:disabled { opacity: 1; }
 

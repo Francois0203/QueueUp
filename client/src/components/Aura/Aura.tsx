@@ -4,7 +4,7 @@ import styles from './Aura.module.css';
 
 /**
  * Ambient background: two soft gradient orbs that drift on their own and lean gently
- * toward the pointer. Pure gradients — never derived from album art (Spotify rules).
+ * toward the pointer. Pure gradients, never derived from album art (Spotify rules).
  */
 export function Aura({ intense = false }: { intense?: boolean }) {
   const reduce = useReducedMotion();
