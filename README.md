@@ -7,7 +7,7 @@ Live song requests for **private parties**. Anyone can host: start a party, show
 - **DJ console** `/dj/CODE`: PIN-protected. Swipe a request right to queue it, left to dismiss it, or tap it for more. Also settings, QR code and ending the party.
 - **Spotify (optional, per DJ)**: live "now playing", song search for guests, and one-tap queueing to the DJ's own Spotify. Without Spotify, guests type song names and the DJ sets "now playing" by hand.
 
-Runs entirely on **Firebase**: Hosting, Firestore, Anonymous Auth and one Cloud Function. Sized to stay inside the free tier.
+Live at **https://queueup-party.web.app**. Runs entirely on **Firebase**: Hosting, Firestore, Anonymous Auth and one Cloud Function. Sized to stay inside the free tier.
 
 ## Run it locally (http://localhost:3000)
 
@@ -72,7 +72,8 @@ test/                  Emulator end-to-end tests + Spotify unit tests
 3. **Firestore**: Build > Firestore Database > Create database > **Production mode**, location **europe-west1**. The location can't be changed later.
 4. **Anonymous sign-in**: Build > Authentication > Get started > Sign-in method > **Anonymous** > Enable.
 5. **Web app config**: Project settings > General > Your apps > Add app > Web. Copy `apiKey`, `authDomain`, `projectId` and `appId`.
-6. **Point the repo at your project**: put your project ID in `.firebaserc`, and set `PUBLIC_URL=https://<project-id>.web.app` in `functions/.env.demo-queueup`.
+6. **Point the repo at your project**: put your project ID in `.firebaserc`, and set `PUBLIC_URL` in `functions/.env.demo-queueup` to your site address.
+   QueueUp uses a second Hosting site with a readable name, `queueup-party` (`firebase hosting:sites:create`), set as `site` in `firebase.json`. The project's default address (`<project-id>.web.app`) only redirects there.
 7. **First deploy from your machine**. As project owner, this switches on the Google Cloud APIs the deploy needs: Cloud Functions, Cloud Build, Artifact Registry, Cloud Run, Cloud Scheduler.
    ```bash
    npx firebase login
@@ -93,7 +94,7 @@ test/                  Emulator end-to-end tests + Spotify unit tests
    | `FIREBASE_PROJECT_ID` | Your project ID |
    | `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_APP_ID` | From step 5 |
    | `FIREBASE_APPCHECK_SITE_KEY` | Optional (see App Check below) |
-10. **Repository variables** (same page, Variables tab): `OPERATOR_NAME`, `OPERATOR_CONTACT`, `OPERATOR_ADDRESS`, `GOVERNING_LAW` for the legal pages. Optional: `PUBLIC_URL` (custom domain) and `ENFORCE_APP_CHECK`.
+10. **Repository variables** (same page, Variables tab): `OPERATOR_NAME`, `OPERATOR_CONTACT`, `OPERATOR_ADDRESS`, `GOVERNING_LAW` for the legal pages. `PUBLIC_URL` (the site address, here `https://queueup-party.web.app`). Optional: `ENFORCE_APP_CHECK`.
 
 After that, every push to `main`:
 1. Type-checks, builds, and runs the full test suite on the emulators.
@@ -104,7 +105,7 @@ Pull requests run the tests but never deploy. You can also run the workflow by h
 ### Spotify redirect URI
 
 Each DJ adds this once to their own Spotify app. The setup guide shows it with a copy button:
-`https://<project-id>.web.app/auth/spotify/callback`
+`https://queueup-party.web.app/auth/spotify/callback`
 
 ### App Check (recommended before you share the site widely)
 
