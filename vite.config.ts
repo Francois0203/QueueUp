@@ -19,7 +19,7 @@ function legalPages(env: Record<string, string>): Plugin {
       });
     },
     closeBundle() {
-      const out = path.resolve(__dirname, 'client/dist');
+      const out = path.resolve(import.meta.dirname, 'client/dist');
       for (const f of LEGAL_FILES) fs.writeFileSync(path.join(out, f), renderLegal(f, env));
     },
   };
@@ -27,7 +27,7 @@ function legalPages(env: Record<string, string>): Plugin {
 
 export default defineConfig(({ mode }) => {
   // Reads .env files from the project root plus the real environment (GitHub Actions secrets).
-  const env = { ...loadEnv(mode, __dirname, ''), ...process.env } as Record<string, string>;
+  const env = { ...loadEnv(mode, import.meta.dirname, ''), ...process.env } as Record<string, string>;
   const emulators = env.USE_EMULATORS === 'true';
   const projectId = env.FIREBASE_PROJECT_ID || 'demo-queueup';
 
@@ -46,7 +46,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: 'client',
-    envDir: __dirname,
+    envDir: import.meta.dirname,
     plugins: [react(), legalPages(env)],
     define: { __FIREBASE__: JSON.stringify(firebase) },
     build: {
