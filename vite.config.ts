@@ -3,24 +3,39 @@ import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
 // @ts-expect-error plain JS helper shared with the build
-import { renderLegal, LEGAL_FILES } from './scripts/legal.mjs';
+import { renderLegal, LEGAL_FILES, publicUrl } from './scripts/legal.mjs';
+// @ts-expect-error plain JS helper shared with the build
+import { robotsTxt, sitemapXml } from './scripts/seo.mjs';
 
-/** Serves /terms and /privacy in dev, and writes them into the build output. */
-function legalPages(env: Record<string, string>): Plugin {
-  const routes: Record<string, string> = { '/terms': 'terms.html', '/privacy': 'privacy.html', '/legal.css': 'legal.css' };
+/**
+ * Static pages built from templates: Terms, Privacy, robots.txt and sitemap.xml. Served in dev and
+ * written into the build. Also tags the app page with its canonical address for search engines.
+ */
+function staticPages(env: Record<string, string>): Plugin {
+  const url: string = publicUrl(env);
+  const files: Record<string, () => string> = {
+    ...Object.fromEntries((LEGAL_FILES as string[]).map(f => [f, () => renderLegal(f, env)])),
+    'robots.txt': () => robotsTxt(url),
+    'sitemap.xml': () => sitemapXml(url),
+  };
+  const routes: Record<string, string> = {
+    '/terms': 'terms.html', '/privacy': 'privacy.html', '/legal.css': 'legal.css', '/robots.txt': 'robots.txt', '/sitemap.xml': 'sitemap.xml',
+  };
+  const types: Record<string, string> = { html: 'text/html', css: 'text/css', txt: 'text/plain', xml: 'application/xml' };
   return {
-    name: 'queueup-legal',
+    name: 'queueup-static-pages',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const file = routes[(req.url || '').split('?')[0]];
         if (!file) return next();
-        res.setHeader('Content-Type', file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8');
-        res.end(renderLegal(file, env));
+        res.setHeader('Content-Type', `${types[file.split('.').pop()!]}; charset=utf-8`);
+        res.end(files[file]());
       });
     },
+    transformIndexHtml: () => [{ tag: 'link', attrs: { rel: 'canonical', href: `${url}/` }, injectTo: 'head' }],
     closeBundle() {
       const out = path.resolve(import.meta.dirname, 'client/dist');
-      for (const f of LEGAL_FILES) fs.writeFileSync(path.join(out, f), renderLegal(f, env));
+      for (const [f, render] of Object.entries(files)) fs.writeFileSync(path.join(out, f), render());
     },
   };
 }
@@ -41,13 +56,13 @@ export default defineConfig(({ mode }) => {
     },
     emulators,
     appCheckKey: env.FIREBASE_APPCHECK_SITE_KEY || '',
-    publicUrl: (env.PUBLIC_URL || `https://${projectId}.web.app`).replace(/\/$/, ''),
+    publicUrl: publicUrl(env),
   };
 
   return {
     root: 'client',
     envDir: import.meta.dirname,
-    plugins: [react(), legalPages(env)],
+    plugins: [react(), staticPages(env)],
     define: { __FIREBASE__: JSON.stringify(firebase) },
     build: {
       outDir: 'dist',
