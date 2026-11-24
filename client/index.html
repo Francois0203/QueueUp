@@ -8,6 +8,11 @@
   <title>QueueUp</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <!-- Open connections early: App Check (reCAPTCHA) must finish before the first Firebase request. -->
+  <link rel="preconnect" href="https://www.google.com">
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://content-firebaseappcheck.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
 </head>
 <body>
   <div id="root"></div>
