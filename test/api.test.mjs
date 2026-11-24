@@ -293,6 +293,37 @@ test('now playing syncs from Spotify and marks the request as played', async () 
   fake.state.nowPlaying = null;
 });
 
+test('"Up next" mirrors Spotify\'s queue; requests removed there are cleared', async () => {
+  const party = await newParty();
+  await connectSpotify(party);
+  const { code, dj } = party;
+  const g = await browser();
+  const t = (await g('search', { code, q: 'dreams' })).data.results.find(x => !x.explicit);
+  const { sig, ...track } = t;
+  const { id } = (await g('request', { code, track, sig })).data;
+  fake.state.upcoming = [];
+  await dj('action', { code, id, action: 'queue' }); // lands in Spotify's queue
+  const handQueued = fake.tracks.find(x => x.id !== t.id);
+  fake.state.upcoming.push(handQueued); // the DJ adds a song in the Spotify app
+  fake.state.nowPlaying = handQueued;
+  try {
+    await dj('poll', { code });
+    const upNext = async () => (await admin.doc(`parties/${code}`).get()).data().upNext.map(x => x.id);
+    assert.deepEqual(await upNext(), [t.id, handQueued.id], 'shows the request and the song added in Spotify');
+
+    // The DJ removes the requested song in Spotify. After the grace period it's cleared.
+    fake.state.upcoming = [handQueued];
+    await admin.doc(`parties/${code}/requests/${id}`).update({ queuedAt: Date.now() - 3 * 60_000 });
+    await new Promise(r => setTimeout(r, 3100)); // server checks Spotify at most every 3 s per party
+    await dj('poll', { code });
+    assert.deepEqual(await upNext(), [handQueued.id]);
+    assert.equal((await admin.doc(`parties/${code}/requests/${id}`).get()).data().status, 'skipped');
+  } finally {
+    fake.state.nowPlaying = null;
+    fake.state.upcoming = [];
+  }
+});
+
 test('closed requests expire; songs skipped in the queue are cleared', async () => {
   const { dj, code } = await newParty();
   const ask = async title => (await (await browser())('request', { code, title })).data.id;

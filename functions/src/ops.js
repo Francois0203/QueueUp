@@ -10,6 +10,7 @@ const IDLE_MS = 48 * 3600_000;      // parties idle this long are deleted
 const CLOSED_TTL_MS = 3 * 3600_000; // played/dismissed requests kept this long
 const QUEUED_TTL_MS = 2 * 3600_000; // 'Up next' songs that never played are cleared after this
 const INVITE_TTL_MS = 10 * 60_000;  // one-time DJ links work this long
+const UP_NEXT_SHOWN = 5;            // songs from Spotify's queue shown to guests
 
 // DJ links are stored hashed, so a leaked database copy can't be used to sign in.
 const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
@@ -131,7 +132,7 @@ async function disconnect(code, r) {
   const batch = db().batch();
   batch.set(r.secrets, { spotify: FieldValue.delete() }, { merge: true });
   batch.set(r.dj, { spotify: FieldValue.delete() }, { merge: true });
-  batch.update(r.party, { spotifyConnected: false, ...(party?.nowPlaying?.source === 'spotify' ? { nowPlaying: null } : {}) });
+  batch.update(r.party, { spotifyConnected: false, upNext: FieldValue.delete(), ...(party?.nowPlaying?.source === 'spotify' ? { nowPlaying: null } : {}) });
   await batch.commit();
 }
 
@@ -193,6 +194,26 @@ async function tidy(code, r) {
   const batch = db().batch();
   old.forEach(d => { batch.delete(d.ref); batch.delete(r.meta.doc(d.id)); });
   stale.forEach(d => closeRequest(batch, r, d.ref, 'skipped', now));
+  await batch.commit();
+}
+
+/**
+ * The DJ removed a requested song from Spotify's queue: it's no longer coming, so stop showing it.
+ * Only when Spotify listed the whole queue (fewer than 20 songs), and after a short grace period
+ * because a song can take a moment to show up in Spotify's queue after it's added.
+ */
+async function clearRemoved(r, queue, playingId) {
+  if (queue.length >= 20) return;
+  const inQueue = new Set(queue.map(t => t.id));
+  const now = Date.now();
+  const queued = await r.requests.where('status', '==', 'queued').get();
+  const gone = queued.docs.filter(d => {
+    const x = d.data();
+    return x.track.uri && !inQueue.has(x.trackId) && x.trackId !== playingId && x.queuedAt < now - 2 * 60_000;
+  });
+  if (!gone.length) return;
+  const batch = db().batch();
+  gone.forEach(d => closeRequest(batch, r, d.ref, 'skipped', now));
   await batch.commit();
 }
 
@@ -389,15 +410,24 @@ export const ops = {
     if (limited(`pollu:${uid}`, 30, 60_000) || limited(`poll:${code}`, 1, 3000)) return { ok: true };
     const { r, party } = await loadParty(code);
     if (!party.spotifyConnected) return { ok: true };
-    let np;
-    try { np = await withSpotify(code, r, c => c.nowPlaying()); } catch (e) { if (e.httpErrorCode) throw e; return { ok: false }; }
+    let np, queue;
+    try {
+      [np, queue] = await withSpotify(code, r, c => Promise.all([c.nowPlaying(), c.queue()]));
+    } catch (e) { if (e.httpErrorCode) throw e; return { ok: false }; }
     const cur = party.nowPlaying;
     const expected = cur ? (cur.isPlaying ? cur.progressMs + (Date.now() - cur.updatedAt) : cur.progressMs) : 0;
     const changed = !np !== !cur
       || (np && (np.track.id !== cur.track.id || np.isPlaying !== cur.isPlaying || Math.abs(expected - np.progressMs) > 2500));
-    if (changed) {
-      await r.party.update({ nowPlaying: np ? { ...np, updatedAt: Date.now(), source: 'spotify' } : null });
-      if (np) await markPlayed(r, np.track.id);
+    // "Up next" mirrors Spotify's real queue (first few songs), so songs the DJ adds in Spotify show too.
+    const upNext = np ? queue.slice(0, UP_NEXT_SHOWN).map(cleanTrack) : [];
+    const queueChanged = upNext.map(t => t.id).join() !== (party.upNext || []).map(t => t.id).join();
+    if (changed || queueChanged) {
+      await r.party.update({
+        ...(changed ? { nowPlaying: np ? { ...np, updatedAt: Date.now(), source: 'spotify' } : null } : {}),
+        ...(queueChanged ? { upNext } : {}),
+      });
+      if (changed && np) await markPlayed(r, np.track.id);
+      if (queueChanged && np) await clearRemoved(r, queue, np.track.id);
     }
     await tidy(code, r).catch(e => logger.warn(`[${code}] tidy failed`, e.message));
     return { ok: true };

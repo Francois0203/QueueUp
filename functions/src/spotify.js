@@ -136,6 +136,14 @@ export function clientFor(getConn, setConn) {
       if (!data || !data.item || data.currently_playing_type !== 'track') return null;
       return { track: toTrack(data.item), progressMs: data.progress_ms ?? 0, isPlaying: Boolean(data.is_playing) };
     },
+    /**
+     * What plays next: songs queued by hand first, then the rest of the playlist or album.
+     * Spotify returns up to about 20 and doesn't say which were queued by hand.
+     */
+    async queue() {
+      const data = await api('/me/player/queue');
+      return (data?.queue || []).filter(t => t?.type === 'track' && t.id).map(toTrack);
+    },
     async addToQueue(uri) {
       await api(`/me/player/queue?uri=${encodeURIComponent(uri)}`, { method: 'POST' });
     },

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, where, type DocumentData } from 'firebase/firestore';
-import type { RoomState, SongRequest, NowPlaying, PartySettings } from '../types';
+import type { RoomState, SongRequest, NowPlaying, PartySettings, Track } from '../types';
 import { db, ensureUser, SPOTIFY_REDIRECT_URI } from '../lib';
 
 export type RoomStatus = 'connecting' | 'live' | 'reconnecting' | 'ended';
@@ -79,6 +79,7 @@ export function useRoom(code: string, { dj = false, enabled = true } = {}) {
       code,
       settings: { partyName: party.name, ...(party.settings as Omit<PartySettings, 'partyName'>) },
       nowPlaying: (party.nowPlaying as NowPlaying | null) ?? null,
+      upNext: (party.upNext as Track[] | undefined) ?? null,
       requests: mapped,
       spotify: {
         connected: Boolean(party.spotifyConnected),

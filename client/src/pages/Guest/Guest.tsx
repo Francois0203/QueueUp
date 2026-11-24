@@ -5,6 +5,7 @@ import {
 } from '../../components';
 import { useDocumentTitle, useNowPlayingSync, useRoom } from '../../hooks';
 import { call, spring } from '../../lib';
+import type { SongRequest, Track } from '../../types';
 import { EndedPage } from '../Ended';
 import { RequestSheet } from './RequestSheet';
 import styles from './Guest.module.css';
@@ -47,6 +48,7 @@ export function GuestPage({ code }: { code: string }) {
   const s = state?.settings;
   const queued = state?.requests.filter(r => r.status === 'queued') ?? [];
   const pending = state?.requests.filter(r => r.status === 'pending') ?? [];
+  const upNext = buildUpNext(state?.spotify.connected ? state.upNext : null, queued);
 
   return (
     <>
@@ -58,15 +60,15 @@ export function GuestPage({ code }: { code: string }) {
         <NowPlayingHero np={state?.nowPlaying ?? null} clockOffset={clockOffset} />
 
         <AnimatePresence initial={false}>
-          {queued.length > 0 && (
+          {upNext.length > 0 && (
             <motion.section key="upnext" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }}>
               <SectionHeader title="Up next" />
               <ul className={styles.list}>
                 <AnimatePresence mode="popLayout" initial={false}>
-                  {queued.map(r => (
-                    <SongRow key={r.id} track={r.track} variant="queued" mine={r.mine}
-                      detail={r.mine ? 'your pick' : r.by ? `for ${r.by}` : ''}>
-                      <span className={styles.tag}>Queued</span>
+                  {upNext.map(({ key, track, req, tag }) => (
+                    <SongRow key={key} track={track} variant="queued" mine={req?.mine}
+                      detail={req?.mine ? 'your pick' : req?.by ? `for ${req.by}` : ''}>
+                      {tag && <span className={styles.tag}>{tag}</span>}
                     </SongRow>
                   ))}
                 </AnimatePresence>
@@ -110,4 +112,24 @@ export function GuestPage({ code }: { code: string }) {
       )}
     </>
   );
+}
+
+type UpNextRow = { key: string; track: Track; req?: SongRequest; tag?: string };
+
+/**
+ * With Spotify: the DJ's real queue (requests marked), then requests further back in the queue.
+ * Without Spotify: the requests the DJ queued.
+ */
+function buildUpNext(spotify: Track[] | null, queued: SongRequest[]): UpNextRow[] {
+  if (!spotify) return queued.map(r => ({ key: r.id, track: r.track, req: r, tag: 'Queued' }));
+  const seen = new Map<string, number>();
+  const rows: UpNextRow[] = spotify.map(track => {
+    const n = seen.get(track.id) ?? 0;
+    seen.set(track.id, n + 1);
+    const req = queued.find(r => r.track.id === track.id);
+    // Key by song (not position), so rows slide up smoothly as the queue moves.
+    return { key: `${track.id}-${n}`, track, req, tag: req ? 'Requested' : undefined };
+  });
+  const later = queued.filter(r => !seen.has(r.track.id));
+  return [...rows, ...later.map(r => ({ key: r.id, track: r.track, req: r, tag: 'Coming up' }))];
 }

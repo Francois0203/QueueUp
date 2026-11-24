@@ -46,6 +46,8 @@ export interface RoomState {
   code: string;
   settings: PartySettings;
   nowPlaying: NowPlaying | null;
+  /** The next songs in the DJ's real Spotify queue (when Spotify is connected). */
+  upNext: Track[] | null;
   requests: SongRequest[];
   spotify: {
     connected: boolean;

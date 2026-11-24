@@ -10,13 +10,14 @@ export async function startFakeSpotify({ port = 0 } = {}) {
     searchCalls: 0,
     rateLimitSearch: 0,          // set to N seconds to answer search with 429 + Retry-After
     queued: [],
+    upcoming: [],                // the player's queue (tracks), as GET /me/player/queue shows it
     nowPlaying: null,
     seq: 0,
   };
   const tracks = [
     { id: 'track00000000000000001', name: 'Dreams', explicit: false, artists: [{ name: 'Fleetwood Mac' }] },
     { id: 'track00000000000000002', name: 'Rude Song', explicit: true, artists: [{ name: 'Some Band' }] },
-  ].map(t => ({ ...t, uri: `spotify:track:${t.id}`, duration_ms: 200000, album: { name: 'Album', images: [] } }));
+  ].map(t => ({ ...t, type: 'track', uri: `spotify:track:${t.id}`, duration_ms: 200000, album: { name: 'Album', images: [] } }));
 
   const issue = () => {
     const n = ++state.seq;
@@ -68,8 +69,13 @@ export async function startFakeSpotify({ port = 0 } = {}) {
     if (url.pathname === '/v1/me/player/currently-playing') {
       return state.nowPlaying ? send(res, 200, { item: state.nowPlaying, progress_ms: 1000, is_playing: true, currently_playing_type: 'track' }) : send(res, 204);
     }
+    if (req.method === 'GET' && url.pathname === '/v1/me/player/queue') {
+      return send(res, 200, { currently_playing: state.nowPlaying, queue: state.upcoming });
+    }
     if (req.method === 'POST' && url.pathname === '/v1/me/player/queue') {
       state.queued.push(url.searchParams.get('uri'));
+      const t = tracks.find(x => x.uri === url.searchParams.get('uri'));
+      if (t) state.upcoming.push(t);
       // Like the real API: a 200 whose body is not JSON.
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       return res.end('ok');
